@@ -109,3 +109,5 @@ SQLModel crea las tablas al iniciar. Para producción se recomienda agregar Alem
 cd backend
 pytest -q
 ```
+
+# neumavision
