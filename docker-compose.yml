@@ -4,7 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: sqlite:////app/data/neumadiesel.db
+      DATABASE_URL: postgresql://postgres:password@host.docker.internal:5432/neumavision
       UPLOAD_DIR: /app/data/uploads
       DETECTOR_MODE: mock
       CORS_ORIGINS: http://localhost:5173

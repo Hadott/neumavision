@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "NeumaDiesel Vision API"
     environment: str = "development"
     api_prefix: str = "/api/v1"
-    database_url: str = "sqlite:///./data/neumadiesel.db"
+    database_url: str = "postgresql://postgres:password@localhost:5432/neumavision"
     upload_dir: Path = Path("./data/uploads")
     detector_mode: str = "mock"
     yolo_model_path: Path = Path("./models/best.pt")
