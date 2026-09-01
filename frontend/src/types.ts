@@ -31,6 +31,18 @@ export type Mission = {
   images: MissionImage[];
 };
 
+export type MissionSummary = {
+  id: string;
+  name: string;
+  segment: string;
+  status: string;
+  created_at: string;
+  image_count: number;
+  detection_count: number;
+  pending_count: number;
+  confirmed_count: number;
+};
+
 export type Health = {
   status: string;
   detector: string;

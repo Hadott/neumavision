@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlmodel import Field, SQLModel
@@ -13,7 +13,7 @@ class Mission(SQLModel, table=True):
     name: str = Field(index=True, max_length=120)
     segment: str = Field(default="Sin tramo", max_length=120)
     status: str = Field(default="uploaded", index=True, max_length=30)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MissionImage(SQLModel, table=True):

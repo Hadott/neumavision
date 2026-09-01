@@ -1,4 +1,4 @@
-import type { Detection, Health, Mission, ReviewStatus } from "./types";
+import type { Detection, Health, Mission, MissionSummary, ReviewStatus } from "./types";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 
@@ -14,6 +14,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>("/health"),
 
+  listMissions: () => request<MissionSummary[]>("/missions"),
+
+  getMission: (id: string) => request<Mission>(`/missions/${id}`),
+
   createMission: (name: string, segment: string, files: File[]) => {
     const body = new FormData();
     body.append("name", name);
@@ -23,6 +27,13 @@ export const api = {
   },
 
   createDemo: () => request<Mission>("/missions/demo", { method: "POST" }),
+
+  deleteMission: (missionId: string) =>
+    fetch(`${API_URL}/missions/${missionId}`, { method: "DELETE" }).then((response) => {
+      if (!response.ok && response.status !== 204) {
+        throw new Error(`Error ${response.status}`);
+      }
+    }),
 
   detect: (missionId: string) => request<Mission>(`/missions/${missionId}/detect`, { method: "POST" }),
 

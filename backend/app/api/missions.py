@@ -1,3 +1,4 @@
+import shutil
 from io import BytesIO
 from pathlib import Path
 
@@ -6,9 +7,10 @@ from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageDraw
 from sqlmodel import Session, delete, select
 
+from app.config import settings
 from app.database import get_session
 from app.models import Detection, Mission, MissionImage
-from app.schemas import DetectionRead, DetectionReview, ImageRead, MissionRead
+from app.schemas import DetectionRead, DetectionReview, ImageRead, MissionRead, MissionSummary
 from app.services.detector import get_detector
 from app.services.metadata import extract_gps
 from app.services.report import build_report
@@ -127,9 +129,51 @@ def create_demo_mission(session: Session = Depends(get_session)) -> MissionRead:
     return serialize_mission(session, mission)
 
 
+@router.get("", response_model=list[MissionSummary])
+def list_missions(session: Session = Depends(get_session)) -> list[MissionSummary]:
+    missions = session.exec(select(Mission).order_by(Mission.created_at.desc())).all()
+    summaries: list[MissionSummary] = []
+    for mission in missions:
+        images = session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all()
+        image_ids = [image.id for image in images]
+        detections = (
+            session.exec(select(Detection).where(Detection.image_id.in_(image_ids))).all()
+            if image_ids
+            else []
+        )
+        summaries.append(
+            MissionSummary(
+                id=mission.id,
+                name=mission.name,
+                segment=mission.segment,
+                status=mission.status,
+                created_at=mission.created_at,
+                image_count=len(images),
+                detection_count=len(detections),
+                pending_count=sum(1 for item in detections if item.review_status == "pending"),
+                confirmed_count=sum(1 for item in detections if item.review_status == "confirmed"),
+            )
+        )
+    return summaries
+
+
 @router.get("/{mission_id}", response_model=MissionRead)
 def get_mission(mission_id: str, session: Session = Depends(get_session)) -> MissionRead:
     return serialize_mission(session, require_mission(session, mission_id))
+
+
+@router.delete("/{mission_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_mission(mission_id: str, session: Session = Depends(get_session)) -> Response:
+    mission = require_mission(session, mission_id)
+    images = session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all()
+    image_ids = [image.id for image in images]
+    if image_ids:
+        session.exec(delete(Detection).where(Detection.image_id.in_(image_ids)))
+    session.exec(delete(MissionImage).where(MissionImage.mission_id == mission.id))
+    session.delete(mission)
+    session.commit()
+    shutil.rmtree(settings.upload_dir / mission_id, ignore_errors=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{mission_id}/detect", response_model=MissionRead)

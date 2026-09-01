@@ -1,4 +1,4 @@
-import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
+import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer } from "react-leaflet";
 
 import type { Mission, MissionImage } from "./types";
 
@@ -27,10 +27,21 @@ export default function MapPanel({ mission, selectedImageId, onSelectImage }: Ma
 
   return (
     <MapContainer center={center} zoom={16} scrollWheelZoom className="findings-map">
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <LayersControl position="topright">
+        <LayersControl.BaseLayer checked name="Calles">
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        </LayersControl.BaseLayer>
+        <LayersControl.BaseLayer name="Satélite">
+          <TileLayer
+            attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            maxNativeZoom={19}
+          />
+        </LayersControl.BaseLayer>
+      </LayersControl>
       {locatedImages.map((image) => {
         const activeDetections = image.detections.filter((item) => item.review_status !== "rejected");
         return (
@@ -39,9 +50,9 @@ export default function MapPanel({ mission, selectedImageId, onSelectImage }: Ma
             center={[Number(image.latitude), Number(image.longitude)]}
             radius={Math.min(15, 7 + activeDetections.length * 2)}
             pathOptions={{
-              color: selectedImageId === image.id ? "#101820" : "#c95f17",
-              fillColor: "#f28b32",
-              fillOpacity: 0.88,
+              color: selectedImageId === image.id ? "#0b0c0e" : "#a16207",
+              fillColor: "#facc15",
+              fillOpacity: 0.9,
               weight: selectedImageId === image.id ? 3 : 2
             }}
             eventHandlers={{ click: () => onSelectImage?.(image) }}

@@ -38,6 +38,18 @@ class MissionRead(BaseModel):
     images: list[ImageRead]
 
 
+class MissionSummary(BaseModel):
+    id: str
+    name: str
+    segment: str
+    status: str
+    created_at: datetime
+    image_count: int
+    detection_count: int
+    pending_count: int
+    confirmed_count: int
+
+
 class DetectionReview(BaseModel):
     review_status: ReviewStatus
 

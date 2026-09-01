@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Calendar,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -12,6 +13,7 @@ import {
   FileImage,
   FileText,
   Gauge,
+  History,
   ImagePlus,
   Layers3,
   LoaderCircle,
@@ -24,6 +26,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Upload,
   X,
   XCircle
@@ -31,10 +34,13 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
+import logoIcon from "./assets/logo-icon-dark.png";
 import MapPanel from "./MapPanel";
-import type { Detection, Health, Mission, MissionImage, ReviewStatus } from "./types";
+import type { Detection, Health, Mission, MissionImage, MissionSummary, ReviewStatus } from "./types";
 
+type Screen = "history" | "workspace";
 type View = "upload" | "review" | "report";
+type Busy = "upload" | "demo" | "detect" | "report" | "open" | null;
 
 const colorForLabel: Record<string, string> = {
   Bache: "#ff6847",
@@ -44,9 +50,13 @@ const colorForLabel: Record<string, string> = {
 
 const fallbackColor = "#4ca8ff";
 const confidence = (value: number) => `${Math.round(value * 100)}%`;
+const statusLabel = (status: string) => (status === "review" ? "En revisión" : "Cargada");
+const formatDate = (value: string) =>
+  new Date(value).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [screen, setScreen] = useState<Screen>("history");
   const [view, setView] = useState<View>("upload");
   const [mission, setMission] = useState<Mission | null>(null);
   const [selectedImageId, setSelectedImageId] = useState("");
@@ -54,15 +64,25 @@ export default function App() {
   const [missionName, setMissionName] = useState("Inspección camino de acceso");
   const [segment, setSegment] = useState("Tramo A");
   const [dragging, setDragging] = useState(false);
-  const [busy, setBusy] = useState<"upload" | "demo" | "detect" | "report" | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState("");
   const [threshold, setThreshold] = useState(0.65);
   const [enabledLabels, setEnabledLabels] = useState<string[]>([]);
+  const [missions, setMissions] = useState<MissionSummary[]>([]);
+  const [missionsLoading, setMissionsLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
+
+  useEffect(() => {
+    if (screen === "history") {
+      refreshMissions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
 
   useEffect(() => {
     if (!mission?.images.length) return;
@@ -100,6 +120,59 @@ export default function App() {
     }, {});
   }, [availableLabels, filteredAll]);
 
+  async function refreshMissions() {
+    setMissionsLoading(true);
+    try {
+      const list = await api.listMissions();
+      setMissions(list);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No fue posible cargar el historial de misiones.");
+    } finally {
+      setMissionsLoading(false);
+    }
+  }
+
+  async function handleDeleteMission(missionId: string, missionName: string) {
+    const confirmed = window.confirm(`¿Eliminar la misión "${missionName}"? Esta acción no se puede deshacer.`);
+    if (!confirmed) return;
+    setDeletingId(missionId);
+    try {
+      await api.deleteMission(missionId);
+      setMissions((current) => current.filter((item) => item.id !== missionId));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No fue posible eliminar la misión.");
+    } finally {
+      setDeletingId("");
+    }
+  }
+
+  function goToHistory() {
+    setScreen("history");
+    setError("");
+  }
+
+  function startNewMission() {
+    resetWorkspace();
+    setScreen("workspace");
+  }
+
+  async function openMission(id: string) {
+    setBusy("open");
+    setError("");
+    try {
+      const loaded = await api.getMission(id);
+      setMission(loaded);
+      setSelectedImageId(loaded.images[0]?.id ?? "");
+      setEnabledLabels(Array.from(new Set(loaded.images.flatMap((image) => image.detections.map((item) => item.label)))));
+      setView(loaded.status === "review" ? "review" : "upload");
+      setScreen("workspace");
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No fue posible abrir la misión.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function acceptFiles(incoming: FileList | File[]) {
     const valid = Array.from(incoming).filter((file) => file.type.startsWith("image/"));
     setFiles((current) => [...current, ...valid].slice(0, 100));
@@ -119,6 +192,7 @@ export default function App() {
       setMission(created);
       setSelectedImageId(created.images[0]?.id ?? "");
       setFiles([]);
+      void refreshMissions();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No fue posible cargar la misión.");
     } finally {
@@ -133,6 +207,7 @@ export default function App() {
       const created = await api.createDemo();
       setMission(created);
       setSelectedImageId(created.images[0]?.id ?? "");
+      void refreshMissions();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No fue posible crear la demostración.");
     } finally {
@@ -149,6 +224,7 @@ export default function App() {
       setMission(processed);
       setEnabledLabels(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label)))));
       setView("review");
+      void refreshMissions();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "La detección no pudo completarse.");
     } finally {
@@ -167,6 +243,7 @@ export default function App() {
           detections: image.detections.map((item) => item.id === updated.id ? updated : item)
         }))
       } : current);
+      void refreshMissions();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No fue posible actualizar el hallazgo.");
     }
@@ -210,7 +287,7 @@ export default function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-icon"><Mountain size={20} /></span>
+          <span className="brand-icon"><img src={logoIcon} alt="NeumaDiesel" /></span>
           <span><strong>NEUMADIESEL</strong><small>Visión de caminos</small></span>
         </div>
         <div className="top-actions">
@@ -218,167 +295,256 @@ export default function App() {
             {health ? <Server size={14} /> : <CloudOff size={14} />}
             {health ? `API · ${health.detector}` : "API sin conexión"}
           </span>
-          {mission && <button className="button ghost" onClick={resetWorkspace}><RotateCcw size={15} /> Nueva misión</button>}
+          {screen === "workspace" && <button className="button ghost" onClick={goToHistory}><History size={15} /> Historial</button>}
+          {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
         </div>
       </header>
 
-      <section className="hero">
-        <div>
-          <span className="overline">Plataforma de inspección RGB</span>
-          <h1>Detecta. Revisa. Informa.</h1>
-          <p>Detecta condiciones que pueden dañar los neumáticos de camiones CAEX y localiza los sectores que requieren mantenimiento.</p>
-        </div>
-        <div className="architecture">
-          <span><Server size={14} /> FastAPI</span>
-          <ChevronRight size={13} />
-          <span><Layers3 size={14} /> React</span>
-          <ChevronRight size={13} />
-          <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
-        </div>
-      </section>
-
-      <nav className="steps">
-        {([
-          ["upload", "1", "Carga"],
-          ["review", "2", "Revisión"],
-          ["report", "3", "Informe"]
-        ] as [View, string, string][]).map(([key, number, label]) => (
-          <button key={key} className={view === key ? "active" : ""} onClick={() => mission && setView(key)} disabled={!mission && key !== "upload"}>
-            <span>{number}</span>{label}
-          </button>
-        ))}
-      </nav>
-
-      {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
-
-      {view === "upload" && (
-        <section className={`workspace upload-layout ${mission ? "has-mission" : ""}`}>
-          <form className="card upload-card" onSubmit={createMission}>
-            <div className="card-title">
-              <div><span className="overline">Entrada</span><h2>Imágenes de la misión</h2></div>
-              <span className="pill">RGB</span>
+      {screen === "history" && (
+        <>
+          <section className="hero">
+            <div>
+              <span className="overline">Plataforma de inspección RGB</span>
+              <h1>Historial de misiones</h1>
+              <p>Revisa las misiones ya procesadas o inicia una nueva inspección del camino minero.</p>
             </div>
-            {!mission ? <>
-              <div className="field-grid">
-                <label><span>Nombre de misión</span><input value={missionName} onChange={(event) => setMissionName(event.target.value)} /></label>
-                <label><span>Tramo</span><input value={segment} onChange={(event) => setSegment(event.target.value)} /></label>
-              </div>
-              <div
-                className={`dropzone ${dragging ? "dragging" : ""}`}
-                onClick={() => inputRef.current?.click()}
-                onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={(event) => { event.preventDefault(); setDragging(false); acceptFiles(event.dataTransfer.files); }}
-              >
-                <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => event.target.files && acceptFiles(event.target.files)} />
-                <span className="upload-icon"><Upload size={25} /></span>
-                <strong>Arrastra las imágenes aquí</strong>
-                <small>JPG, PNG o WebP · hasta 100 archivos por lote</small>
-                <span className="button secondary"><ImagePlus size={15} /> Seleccionar archivos</span>
-              </div>
-              {files.length > 0 && <div className="queued-files">
-                <div className="queue-head"><strong>{files.length} imágenes listas</strong><button type="button" onClick={() => setFiles([])}>Quitar todas</button></div>
-                {files.slice(0, 4).map((file, index) => <div className="queued-file" key={`${file.name}-${index}`}><FileImage size={16} /><span>{file.name}</span><small>{(file.size / 1024 / 1024).toFixed(1)} MB</small><button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></div>)}
-                {files.length > 4 && <small className="more-files">+ {files.length - 4} archivos adicionales</small>}
-              </div>}
-              <div className="form-actions">
-                <button className="button primary" disabled={busy !== null}><Upload size={16} />{busy === "upload" ? "Subiendo…" : "Crear misión"}</button>
-                <button className="button demo" type="button" onClick={createDemo} disabled={busy !== null}>{busy === "demo" ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Usar datos demo</button>
-              </div>
-            </> : <div className="uploaded-state">
-              <span className="success-icon"><CheckCircle2 size={27} /></span>
-              <div><span className="overline">Carga completada</span><h3>{mission.name}</h3><p>{mission.segment} · {mission.images.length} imágenes</p></div>
-              <div className="mission-thumbs">{mission.images.slice(0, 5).map((image) => <img key={image.id} src={api.imageUrl(image.image_url)} alt="Camino cargado" />)}</div>
-            </div>}
-          </form>
-
-          <aside className="card process-card">
-            <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div><Gauge size={20} /></div>
-            <div className="pipeline">
-              <div className={mission ? "complete" : "current"}><span>{mission ? <Check size={14} /> : "1"}</span><div><strong>Validar lote</strong><small>{mission ? `${mission.images.length} imágenes compatibles` : "Esperando imágenes"}</small></div></div>
-              <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>Ejecutar detector</strong><small>{health?.detector === "yolo" ? "Modelo YOLO conectado" : "Adaptador simulado"}</small></div></div>
-              <div className={mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "3"}</span><div><strong>Preparar revisión</strong><small>Resultados normalizados por imagen</small></div></div>
+            <div className="architecture">
+              <span><Server size={14} /> FastAPI</span>
+              <ChevronRight size={13} />
+              <span><Layers3 size={14} /> React</span>
+              <ChevronRight size={13} />
+              <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
             </div>
-            <div className="process-note"><ShieldCheck size={16} /><span>El backend guarda cada misión y expone los resultados mediante una API documentada.</span></div>
-            <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> Ejecutar detección</>}</button>
-          </aside>
-        </section>
+          </section>
+
+          {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
+
+          <section className="workspace history-layout">
+            <div className="history-toolbar">
+              <div><span className="overline">Misiones</span><h2>{missions.length} registradas</h2></div>
+              <div className="history-toolbar-actions">
+                <button className="button ghost" onClick={refreshMissions} disabled={missionsLoading}>
+                  {missionsLoading ? <LoaderCircle className="spin" size={15} /> : <RotateCcw size={15} />} Actualizar
+                </button>
+                <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
+              </div>
+            </div>
+
+            {missionsLoading && !missions.length ? (
+              <div className="card history-empty"><LoaderCircle className="spin" size={20} /><span>Cargando misiones…</span></div>
+            ) : missions.length ? (
+              <div className="history-grid">
+                {missions.map((item) => (
+                  <div
+                    key={item.id}
+                    className="card history-card"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => busy !== "open" && openMission(item.id)}
+                    onKeyDown={(event) => {
+                      if ((event.key === "Enter" || event.key === " ") && busy !== "open") openMission(item.id);
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="history-delete"
+                      title="Eliminar misión"
+                      disabled={deletingId === item.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteMission(item.id, item.name);
+                      }}
+                    >
+                      {deletingId === item.id ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
+                    </button>
+                    <div className="history-card-top">
+                      <span className={`status-badge ${item.status}`}>{statusLabel(item.status)}</span>
+                      <span className="history-date"><Calendar size={12} /> {formatDate(item.created_at)}</span>
+                    </div>
+                    <h3>{item.name}</h3>
+                    <p>{item.segment}</p>
+                    <div className="history-card-stats">
+                      <span><FileImage size={13} /> {item.image_count} imágenes</span>
+                      <span><ScanLine size={13} /> {item.detection_count} hallazgos</span>
+                      <span><CheckCircle2 size={13} /> {item.confirmed_count} confirmados</span>
+                    </div>
+                    <span className="history-open">Abrir misión <ArrowRight size={13} /></span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="card history-empty">
+                <Mountain size={22} />
+                <strong>Todavía no hay misiones</strong>
+                <span>Crea una misión nueva o usa datos demo para ver la plataforma en acción.</span>
+                <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
+              </div>
+            )}
+          </section>
+        </>
       )}
 
-      {view === "review" && mission && selectedImage && (
-        <section className="workspace review-layout">
-          <aside className="card filters-card">
-            <div className="card-title compact"><div><span className="overline">Filtros</span><h2>Hallazgos</h2></div><SlidersHorizontal size={18} /></div>
-            <div className="filter-list">
-              {availableLabels.map((label) => <button key={label} className={enabledLabels.includes(label) ? "enabled" : ""} onClick={() => toggleLabel(label)}><i style={{ background: colorForLabel[label] ?? fallbackColor }} /><span>{label}</span><strong>{counts[label] ?? 0}</strong><em>{enabledLabels.includes(label) && <Check size={11} />}</em></button>)}
+      {screen === "workspace" && (
+        <>
+          <section className="hero">
+            <div>
+              <span className="overline">Plataforma de inspección RGB</span>
+              <h1>Detecta. Revisa. Informa.</h1>
+              <p>Detecta condiciones que pueden dañar los neumáticos de camiones CAEX y localiza los sectores que requieren mantenimiento.</p>
             </div>
-            <div className="threshold">
-              <label><span>Confianza mínima</span><strong>{confidence(threshold)}</strong></label>
-              <input type="range" min="0.5" max="0.95" step="0.01" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
-              <small><span>50%</span><span>95%</span></small>
+            <div className="architecture">
+              <span><Server size={14} /> FastAPI</span>
+              <ChevronRight size={13} />
+              <span><Layers3 size={14} /> React</span>
+              <ChevronRight size={13} />
+              <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
             </div>
-            <div className="stats-mini">
-              <div><ScanLine size={15} /><span>Visibles</span><strong>{filteredAll.length}</strong></div>
-              <div><CircleDot size={15} /><span>Pendientes</span><strong>{pending}</strong></div>
-              <div><CheckCircle2 size={15} /><span>Confirmadas</span><strong>{confirmed}</strong></div>
-            </div>
-          </aside>
+          </section>
 
-          <div className="viewer-column">
-            <div className="card viewer-card">
-              <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><span className="pill">{visibleDetections.length} hallazgos</span></div>
-              <div className="image-stage">
-                <img src={api.imageUrl(selectedImage.image_url)} alt="Camino minero bajo revisión" />
-                {visibleDetections.map((item) => <button key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }} onClick={() => updateReview(item, item.review_status === "confirmed" ? "pending" : "confirmed")}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</button>)}
-                <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
-              </div>
-              <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
-            </div>
-            <div className="thumbnail-row">{mission.images.map((image) => <button key={image.id} className={image.id === selectedImage.id ? "selected" : ""} onClick={() => setSelectedImageId(image.id)}><img src={api.imageUrl(image.image_url)} alt="Miniatura" /><span>{image.detections.length}</span></button>)}</div>
-          </div>
+          <nav className="steps">
+            {([
+              ["upload", "1", "Carga"],
+              ["review", "2", "Revisión"],
+              ["report", "3", "Informe"]
+            ] as [View, string, string][]).map(([key, number, label]) => (
+              <button key={key} className={view === key ? "active" : ""} onClick={() => mission && setView(key)} disabled={!mission && key !== "upload"}>
+                <span>{number}</span>{label}
+              </button>
+            ))}
+          </nav>
 
-          <aside className="card review-card">
-            <div className="card-title compact"><div><span className="overline">Imagen actual</span><h2>Revisión</h2></div><span className="pill">{selectedImage.detections.length}</span></div>
-            <div className="detection-list">
-              {selectedImage.detections.map((item) => <div className={`detection-item ${item.review_status}`} key={item.id}>
-                <div><i style={{ background: colorForLabel[item.label] ?? fallbackColor }} /><strong>{item.label}</strong><span>{confidence(item.confidence)}</span></div>
-                <div className="confidence-line"><span style={{ width: confidence(item.confidence), background: colorForLabel[item.label] ?? fallbackColor }} /></div>
-                <div className="review-actions">
-                  <button className={item.review_status === "confirmed" ? "active confirm" : ""} onClick={() => updateReview(item, "confirmed")}><Check size={13} /> Confirmar</button>
-                  <button className={item.review_status === "rejected" ? "active reject" : ""} onClick={() => updateReview(item, "rejected")}><XCircle size={13} /> Descartar</button>
+          {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
+
+          {view === "upload" && (
+            <section className={`workspace upload-layout ${mission ? "has-mission" : ""}`}>
+              <form className="card upload-card" onSubmit={createMission}>
+                <div className="card-title">
+                  <div><span className="overline">Entrada</span><h2>Imágenes de la misión</h2></div>
+                  <span className="pill">RGB</span>
                 </div>
-              </div>)}
-            </div>
-            <button className="button primary full" onClick={() => setView("report")}><FileText size={16} /> Preparar informe</button>
-          </aside>
-        </section>
-      )}
+                {!mission ? <>
+                  <div className="field-grid">
+                    <label><span>Nombre de misión</span><input value={missionName} onChange={(event) => setMissionName(event.target.value)} /></label>
+                    <label><span>Tramo</span><input value={segment} onChange={(event) => setSegment(event.target.value)} /></label>
+                  </div>
+                  <div
+                    className={`dropzone ${dragging ? "dragging" : ""}`}
+                    onClick={() => inputRef.current?.click()}
+                    onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+                    onDragLeave={() => setDragging(false)}
+                    onDrop={(event) => { event.preventDefault(); setDragging(false); acceptFiles(event.dataTransfer.files); }}
+                  >
+                    <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => event.target.files && acceptFiles(event.target.files)} />
+                    <span className="upload-icon"><Upload size={25} /></span>
+                    <strong>Arrastra las imágenes aquí</strong>
+                    <small>JPG, PNG o WebP · hasta 100 archivos por lote</small>
+                    <span className="button secondary"><ImagePlus size={15} /> Seleccionar archivos</span>
+                  </div>
+                  {files.length > 0 && <div className="queued-files">
+                    <div className="queue-head"><strong>{files.length} imágenes listas</strong><button type="button" onClick={() => setFiles([])}>Quitar todas</button></div>
+                    {files.slice(0, 4).map((file, index) => <div className="queued-file" key={`${file.name}-${index}`}><FileImage size={16} /><span>{file.name}</span><small>{(file.size / 1024 / 1024).toFixed(1)} MB</small><button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></div>)}
+                    {files.length > 4 && <small className="more-files">+ {files.length - 4} archivos adicionales</small>}
+                  </div>}
+                  <div className="form-actions">
+                    <button className="button primary" disabled={busy !== null}><Upload size={16} />{busy === "upload" ? "Subiendo…" : "Crear misión"}</button>
+                    <button className="button demo" type="button" onClick={createDemo} disabled={busy !== null}>{busy === "demo" ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Usar datos demo</button>
+                  </div>
+                </> : <div className="uploaded-state">
+                  <span className="success-icon"><CheckCircle2 size={27} /></span>
+                  <div><span className="overline">Carga completada</span><h3>{mission.name}</h3><p>{mission.segment} · {mission.images.length} imágenes</p></div>
+                  <div className="mission-thumbs">{mission.images.slice(0, 5).map((image) => <img key={image.id} src={api.imageUrl(image.image_url)} alt="Camino cargado" />)}</div>
+                </div>}
+              </form>
 
-      {view === "report" && mission && (
-        <section className="workspace report-layout">
-          <article className="card report-preview">
-            <div className="report-header"><span className="overline">Informe de inspección</span><h2>{mission.name}</h2><p>{mission.segment} · {new Date(mission.created_at).toLocaleDateString("es-CL")}</p>{health?.detector === "mock" && <span className="demo-label"><AlertTriangle size={13} /> Resultados simulados</span>}</div>
-            <div className="report-content">
-              <div className="metric-grid"><div><span>Imágenes</span><strong>{mission.images.length}</strong></div><div><span>Hallazgos</span><strong>{allDetections.length}</strong></div><div><span>Confirmados</span><strong>{confirmed}</strong></div><div><span>Confianza media</span><strong>{confidence(average)}</strong></div></div>
-              <h3>Distribución de anomalías</h3>
-              <div className="bar-list">{availableLabels.map((label) => <div key={label}><span>{label}</span><div><i style={{ width: `${allDetections.length ? ((counts[label] ?? 0) / Math.max(...Object.values(counts), 1)) * 100 : 0}%`, background: colorForLabel[label] ?? fallbackColor }} /></div><strong>{counts[label] ?? 0}</strong></div>)}</div>
-              <div className="map-section">
-                <div className="map-heading"><div><MapPin size={16} /><span><strong>Mapa de hallazgos</strong><small>Sectores del camino que requieren revisión o mantenimiento.</small></span></div><span className="pill">{mission.images.filter((image) => image.latitude !== null).length} ubicaciones</span></div>
-                <MapPanel mission={mission} selectedImageId={selectedImageId} onSelectImage={(image) => setSelectedImageId(image.id)} />
+              <aside className="card process-card">
+                <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div><Gauge size={20} /></div>
+                <div className="pipeline">
+                  <div className={mission ? "complete" : "current"}><span>{mission ? <Check size={14} /> : "1"}</span><div><strong>Validar lote</strong><small>{mission ? `${mission.images.length} imágenes compatibles` : "Esperando imágenes"}</small></div></div>
+                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>Ejecutar detector</strong><small>{health?.detector === "yolo" ? "Modelo YOLO conectado" : "Adaptador simulado"}</small></div></div>
+                  <div className={mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "3"}</span><div><strong>Preparar revisión</strong><small>Resultados normalizados por imagen</small></div></div>
+                </div>
+                <div className="process-note"><ShieldCheck size={16} /><span>El backend guarda cada misión y expone los resultados mediante una API documentada.</span></div>
+                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> Ejecutar detección</>}</button>
+              </aside>
+            </section>
+          )}
+
+          {view === "review" && mission && selectedImage && (
+            <section className="workspace review-layout">
+              <aside className="card filters-card">
+                <div className="card-title compact"><div><span className="overline">Filtros</span><h2>Hallazgos</h2></div><SlidersHorizontal size={18} /></div>
+                <div className="filter-list">
+                  {availableLabels.map((label) => <button key={label} className={enabledLabels.includes(label) ? "enabled" : ""} onClick={() => toggleLabel(label)}><i style={{ background: colorForLabel[label] ?? fallbackColor }} /><span>{label}</span><strong>{counts[label] ?? 0}</strong><em>{enabledLabels.includes(label) && <Check size={11} />}</em></button>)}
+                </div>
+                <div className="threshold">
+                  <label><span>Confianza mínima</span><strong>{confidence(threshold)}</strong></label>
+                  <input type="range" min="0.5" max="0.95" step="0.01" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
+                  <small><span>50%</span><span>95%</span></small>
+                </div>
+                <div className="stats-mini">
+                  <div><ScanLine size={15} /><span>Visibles</span><strong>{filteredAll.length}</strong></div>
+                  <div><CircleDot size={15} /><span>Pendientes</span><strong>{pending}</strong></div>
+                  <div><CheckCircle2 size={15} /><span>Confirmadas</span><strong>{confirmed}</strong></div>
+                </div>
+              </aside>
+
+              <div className="viewer-column">
+                <div className="card viewer-card">
+                  <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><span className="pill">{visibleDetections.length} hallazgos</span></div>
+                  <div className="image-stage">
+                    <img src={api.imageUrl(selectedImage.image_url)} alt="Camino minero bajo revisión" />
+                    {visibleDetections.map((item) => <button key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }} onClick={() => updateReview(item, item.review_status === "confirmed" ? "pending" : "confirmed")}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</button>)}
+                    <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
+                  </div>
+                  <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
+                </div>
+                <div className="thumbnail-row">{mission.images.map((image) => <button key={image.id} className={image.id === selectedImage.id ? "selected" : ""} onClick={() => setSelectedImageId(image.id)}><img src={api.imageUrl(image.image_url)} alt="Miniatura" /><span>{image.detections.length}</span></button>)}</div>
               </div>
-              <div className="report-info"><MapPin size={17} /><span><strong>Ubicación aproximada por imagen</strong><small>FastAPI extrae automáticamente las coordenadas GPS de los metadatos EXIF cuando están disponibles.</small></span></div>
-            </div>
-          </article>
-          <aside className="card export-card">
-            <span className="export-icon"><FileText size={27} /></span>
-            <span className="overline">Exportación</span>
-            <h2>Informe listo</h2>
-            <p>El PDF se genera en FastAPI con los datos actuales de la misión y el estado de revisión.</p>
-            <div className="export-list"><span><Check size={14} /> Resumen consolidado</span><span><Check size={14} /> Conteo por clase</span><span><Check size={14} /> Detalle por imagen</span><span><Check size={14} /> Estado de cada hallazgo</span></div>
-            <button className="button primary full large" onClick={downloadReport} disabled={busy !== null}>{busy === "report" ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />} Descargar PDF</button>
-            <button className="button secondary full" onClick={() => setView("review")}><ArrowLeft size={15} /> Volver a revisión</button>
-          </aside>
-        </section>
+
+              <aside className="card review-card">
+                <div className="card-title compact"><div><span className="overline">Imagen actual</span><h2>Revisión</h2></div><span className="pill">{selectedImage.detections.length}</span></div>
+                <div className="detection-list">
+                  {selectedImage.detections.map((item) => <div className={`detection-item ${item.review_status}`} key={item.id}>
+                    <div><i style={{ background: colorForLabel[item.label] ?? fallbackColor }} /><strong>{item.label}</strong><span>{confidence(item.confidence)}</span></div>
+                    <div className="confidence-line"><span style={{ width: confidence(item.confidence), background: colorForLabel[item.label] ?? fallbackColor }} /></div>
+                    <div className="review-actions">
+                      <button className={item.review_status === "confirmed" ? "active confirm" : ""} onClick={() => updateReview(item, "confirmed")}><Check size={13} /> Confirmar</button>
+                      <button className={item.review_status === "rejected" ? "active reject" : ""} onClick={() => updateReview(item, "rejected")}><XCircle size={13} /> Descartar</button>
+                    </div>
+                  </div>)}
+                </div>
+                <button className="button primary full" onClick={() => setView("report")}><FileText size={16} /> Preparar informe</button>
+              </aside>
+            </section>
+          )}
+
+          {view === "report" && mission && (
+            <section className="workspace report-layout">
+              <article className="card report-preview">
+                <div className="report-header"><img className="report-header-logo" src={logoIcon} alt="NeumaDiesel" /><span className="overline">Informe de inspección</span><h2>{mission.name}</h2><p>{mission.segment} · {new Date(mission.created_at).toLocaleDateString("es-CL")}</p>{health?.detector === "mock" && <span className="demo-label"><AlertTriangle size={13} /> Resultados simulados</span>}</div>
+                <div className="report-content">
+                  <div className="metric-grid"><div><span>Imágenes</span><strong>{mission.images.length}</strong></div><div><span>Hallazgos</span><strong>{allDetections.length}</strong></div><div><span>Confirmados</span><strong>{confirmed}</strong></div><div><span>Confianza media</span><strong>{confidence(average)}</strong></div></div>
+                  <h3>Distribución de anomalías</h3>
+                  <div className="bar-list">{availableLabels.map((label) => <div key={label}><span>{label}</span><div><i style={{ width: `${allDetections.length ? ((counts[label] ?? 0) / Math.max(...Object.values(counts), 1)) * 100 : 0}%`, background: colorForLabel[label] ?? fallbackColor }} /></div><strong>{counts[label] ?? 0}</strong></div>)}</div>
+                  <div className="map-section">
+                    <div className="map-heading"><div><MapPin size={16} /><span><strong>Mapa de hallazgos</strong><small>Sectores del camino que requieren revisión o mantenimiento.</small></span></div><span className="pill">{mission.images.filter((image) => image.latitude !== null).length} ubicaciones</span></div>
+                    <MapPanel mission={mission} selectedImageId={selectedImageId} onSelectImage={(image) => setSelectedImageId(image.id)} />
+                  </div>
+                  <div className="report-info"><MapPin size={17} /><span><strong>Ubicación aproximada por imagen</strong><small>FastAPI extrae automáticamente las coordenadas GPS de los metadatos EXIF cuando están disponibles.</small></span></div>
+                </div>
+              </article>
+              <aside className="card export-card">
+                <span className="export-icon"><FileText size={27} /></span>
+                <span className="overline">Exportación</span>
+                <h2>Informe listo</h2>
+                <p>El PDF se genera en FastAPI con los datos actuales de la misión y el estado de revisión.</p>
+                <div className="export-list"><span><Check size={14} /> Resumen consolidado</span><span><Check size={14} /> Conteo por clase</span><span><Check size={14} /> Detalle por imagen</span><span><Check size={14} /> Estado de cada hallazgo</span></div>
+                <button className="button primary full large" onClick={downloadReport} disabled={busy !== null}>{busy === "report" ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />} Descargar PDF</button>
+                <button className="button secondary full" onClick={() => setView("review")}><ArrowLeft size={15} /> Volver a revisión</button>
+              </aside>
+            </section>
+          )}
+        </>
       )}
 
       <footer><span>NeumaDiesel · Proyecto Capstone UCN</span><span><ShieldCheck size={13} /> Frontend y backend desacoplados</span></footer>
