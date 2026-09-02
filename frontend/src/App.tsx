@@ -5,8 +5,10 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleDot,
+  Clock,
   CloudOff,
   Database,
   Download,
@@ -16,6 +18,7 @@ import {
   History,
   ImagePlus,
   Layers3,
+  LayoutDashboard,
   LoaderCircle,
   MapPin,
   Mountain,
@@ -28,6 +31,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  Wrench,
   X,
   XCircle
 } from "lucide-react";
@@ -35,12 +39,14 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
 import logoIcon from "./assets/logo-icon-dark.png";
+import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
 import MapPanel from "./MapPanel";
-import type { Detection, Health, Mission, MissionImage, MissionSummary, ReviewStatus } from "./types";
+import type { DashboardFinding, Detection, Health, Mission, MissionImage, MissionSummary, RepairStatus } from "./types";
 
-type Screen = "history" | "workspace";
+type Screen = "history" | "workspace" | "dashboard";
 type View = "upload" | "review" | "report";
 type Busy = "upload" | "demo" | "detect" | "report" | "open" | null;
+type DashReview = "pending" | "confirmed";
 
 const colorForLabel: Record<string, string> = {
   Bache: "#ff6847",
@@ -53,6 +59,12 @@ const confidence = (value: number) => `${Math.round(value * 100)}%`;
 const statusLabel = (status: string) => (status === "review" ? "En revisión" : "Cargada");
 const formatDate = (value: string) =>
   new Date(value).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
+const formatDateTime = (value: string) =>
+  new Date(value).toLocaleString("es-CL", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+const ALL_CRITICALITY: Criticality[] = ["critico", "moderado", "optimo"];
+const ALL_DASH_REVIEW: DashReview[] = ["pending", "confirmed"];
+const ALL_DASH_REPAIR: RepairStatus[] = ["pending", "repaired"];
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -73,6 +85,16 @@ export default function App() {
   const [deletingId, setDeletingId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [dashFindings, setDashFindings] = useState<DashboardFinding[]>([]);
+  const [dashLoading, setDashLoading] = useState(false);
+  const [dashSelectedId, setDashSelectedId] = useState("");
+  const [dashCriticality, setDashCriticality] = useState<Criticality[]>(ALL_CRITICALITY);
+  const [dashLabels, setDashLabels] = useState<string[]>([]);
+  const [dashReview, setDashReview] = useState<DashReview[]>(ALL_DASH_REVIEW);
+  const [dashRepair, setDashRepair] = useState<RepairStatus[]>(ALL_DASH_REPAIR);
+  const [dashMission, setDashMission] = useState("");
+  const [repairBusyId, setRepairBusyId] = useState("");
+
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
@@ -80,6 +102,8 @@ export default function App() {
   useEffect(() => {
     if (screen === "history") {
       refreshMissions();
+    } else if (screen === "dashboard") {
+      refreshDashboard();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
@@ -120,6 +144,53 @@ export default function App() {
     }, {});
   }, [availableLabels, filteredAll]);
 
+  const availableDashLabels = useMemo(
+    () => Array.from(new Set(dashFindings.map((item) => item.label))),
+    [dashFindings]
+  );
+  const dashMissionOptions = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; segment: string }>();
+    dashFindings.forEach((item) => {
+      if (!seen.has(item.mission_id)) {
+        seen.set(item.mission_id, { id: item.mission_id, name: item.mission_name, segment: item.mission_segment });
+      }
+    });
+    return Array.from(seen.values());
+  }, [dashFindings]);
+  const dashStats = useMemo(() => {
+    const critico = dashFindings.filter((item) => criticalityOf(item.confidence) === "critico").length;
+    const moderado = dashFindings.filter((item) => criticalityOf(item.confidence) === "moderado").length;
+    const optimo = dashFindings.filter((item) => criticalityOf(item.confidence) === "optimo").length;
+    const repaired = dashFindings.filter((item) => item.repair_status === "repaired").length;
+    return { total: dashFindings.length, critico, moderado, optimo, repaired };
+  }, [dashFindings]);
+  const dashVisible = useMemo(() => dashFindings.filter((item) => {
+    if (!dashCriticality.includes(criticalityOf(item.confidence))) return false;
+    if (!dashLabels.includes(item.label)) return false;
+    if (!dashReview.includes(item.review_status as DashReview)) return false;
+    if (!dashRepair.includes(item.repair_status)) return false;
+    if (dashMission && item.mission_id !== dashMission) return false;
+    return true;
+  }), [dashFindings, dashCriticality, dashLabels, dashReview, dashRepair, dashMission]);
+  const dashVisibleCritico = dashVisible.filter((item) => criticalityOf(item.confidence) === "critico").length;
+  const dashVisibleModerado = dashVisible.filter((item) => criticalityOf(item.confidence) === "moderado").length;
+  const dashVisibleOptimo = dashVisible.filter((item) => criticalityOf(item.confidence) === "optimo").length;
+  const dashVisibleRepaired = dashVisible.filter((item) => item.repair_status === "repaired").length;
+  const dashLabelCounts = useMemo(() => availableDashLabels.reduce<Record<string, number>>((result, label) => {
+    result[label] = dashVisible.filter((item) => item.label === label).length;
+    return result;
+  }, {}), [availableDashLabels, dashVisible]);
+  const dashReviewCounts = {
+    confirmed: dashVisible.filter((item) => item.review_status === "confirmed").length,
+    pending: dashVisible.filter((item) => item.review_status === "pending").length
+  };
+  const dashRepairCounts = {
+    pending: dashVisible.filter((item) => item.repair_status === "pending").length,
+    repaired: dashVisibleRepaired
+  };
+  const selectedFinding = dashFindings.find((item) => item.id === dashSelectedId) ?? null;
+  const selectedCriticality = selectedFinding ? criticalityOf(selectedFinding.confidence) : null;
+
   async function refreshMissions() {
     setMissionsLoading(true);
     try {
@@ -129,6 +200,21 @@ export default function App() {
       setError(requestError instanceof Error ? requestError.message : "No fue posible cargar el historial de misiones.");
     } finally {
       setMissionsLoading(false);
+    }
+  }
+
+  async function refreshDashboard() {
+    setDashLoading(true);
+    try {
+      const list = await api.dashboardFindings();
+      setDashFindings(list);
+      const labels = Array.from(new Set(list.map((item) => item.label)));
+      setDashLabels((current) => current.length ? current.filter((label) => labels.includes(label)) : labels);
+      setDashSelectedId((current) => current && list.some((item) => item.id === current) ? current : (list[0]?.id ?? ""));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No fue posible cargar el dashboard.");
+    } finally {
+      setDashLoading(false);
     }
   }
 
@@ -148,6 +234,11 @@ export default function App() {
 
   function goToHistory() {
     setScreen("history");
+    setError("");
+  }
+
+  function openDashboard() {
+    setScreen("dashboard");
     setError("");
   }
 
@@ -232,21 +323,37 @@ export default function App() {
     }
   }
 
-  async function updateReview(detection: Detection, reviewStatus: ReviewStatus) {
-    if (!mission) return;
+  async function toggleRepairStatus(finding: DashboardFinding) {
+    const next: RepairStatus = finding.repair_status === "repaired" ? "pending" : "repaired";
+    setRepairBusyId(finding.id);
     try {
-      const updated = await api.reviewDetection(mission.id, detection.id, reviewStatus);
-      setMission((current) => current ? {
-        ...current,
-        images: current.images.map((image) => ({
-          ...image,
-          detections: image.detections.map((item) => item.id === updated.id ? updated : item)
-        }))
-      } : current);
-      void refreshMissions();
+      const updated = await api.updateRepairStatus(finding.mission_id, finding.id, next);
+      setDashFindings((current) => current.map((item) => item.id === finding.id ? { ...item, repair_status: updated.repair_status } : item));
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No fue posible actualizar el hallazgo.");
+      setError(requestError instanceof Error ? requestError.message : "No fue posible actualizar el estado de reparación.");
+    } finally {
+      setRepairBusyId("");
     }
+  }
+
+  function toggleDashCriticality(value: Criticality) {
+    setDashCriticality((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function toggleDashLabel(label: string) {
+    setDashLabels((current) => current.includes(label) ? current.filter((item) => item !== label) : [...current, label]);
+  }
+
+  function toggleDashReview(value: DashReview) {
+    setDashReview((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function toggleDashRepair(value: RepairStatus) {
+    setDashRepair((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value]);
+  }
+
+  function goToFindingMission(finding: DashboardFinding) {
+    void openMission(finding.mission_id);
   }
 
   async function downloadReport() {
@@ -295,7 +402,9 @@ export default function App() {
             {health ? <Server size={14} /> : <CloudOff size={14} />}
             {health ? `API · ${health.detector}` : "API sin conexión"}
           </span>
-          {screen === "workspace" && <button className="button ghost" onClick={goToHistory}><History size={15} /> Historial</button>}
+          {screen !== "history" && <button className="button ghost" onClick={goToHistory}><History size={15} /> Historial</button>}
+          {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}><LayoutDashboard size={15} /> Dashboard</button>}
+          {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
           {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
         </div>
       </header>
@@ -381,6 +490,245 @@ export default function App() {
               </div>
             )}
           </section>
+        </>
+      )}
+
+      {screen === "dashboard" && (
+        <>
+          <section className="hero">
+            <div>
+              <span className="overline">Plataforma de inspección RGB</span>
+              <h1>Dashboard operacional</h1>
+              <p>Monitorea la criticidad de los hallazgos en los caminos mineros y revisa el detalle de cada uno sin salir del mapa.</p>
+            </div>
+            <div className="architecture">
+              <span><Server size={14} /> FastAPI</span>
+              <ChevronRight size={13} />
+              <span><Layers3 size={14} /> React</span>
+              <ChevronRight size={13} />
+              <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
+            </div>
+          </section>
+
+          {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
+
+          {dashLoading && !dashFindings.length ? (
+            <section className="workspace"><div className="card history-empty"><LoaderCircle className="spin" size={20} /><span>Cargando dashboard…</span></div></section>
+          ) : !dashFindings.length ? (
+            <section className="workspace"><div className="card history-empty">
+              <Mountain size={22} />
+              <strong>Todavía no hay hallazgos</strong>
+              <span>Procesa una misión para ver sus hallazgos en el dashboard operacional.</span>
+              <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
+            </div></section>
+          ) : (
+            <section className="workspace dash-wide" style={{ paddingBottom: 24 }}>
+              <div className="card" style={{ padding: "18px 19px 17px" }}>
+                <div className="kpi-strip-head">
+                  <h3>Resumen operacional</h3>
+                  <small>Todas las misiones</small>
+                </div>
+                <div className="kpi-row">
+                  <div className="card kpi-card">
+                    <span className="kpi-icon" style={{ background: "#edf0f1", color: "#4c5962" }}><Gauge size={19} /></span>
+                    <span><strong>{dashStats.total}</strong><span>Hallazgos activos</span></span>
+                  </div>
+                  <div className="card kpi-card">
+                    <span className="kpi-icon" style={{ background: "#fff1ef", color: "#c0392b" }}><AlertTriangle size={19} /></span>
+                    <span><strong style={{ color: "#c0392b" }}>{dashStats.critico}</strong><span>Críticos</span></span>
+                  </div>
+                  <div className="card kpi-card">
+                    <span className="kpi-icon" style={{ background: "#fef3c7", color: "#a16207" }}><Clock size={19} /></span>
+                    <span><strong style={{ color: "#a16207" }}>{dashStats.moderado}</strong><span>Moderados</span></span>
+                  </div>
+                  <div className="card kpi-card">
+                    <span className="kpi-icon" style={{ background: "#e2f6f2", color: "#167d72" }}><CheckCircle2 size={19} /></span>
+                    <span><strong style={{ color: "#167d72" }}>{dashStats.optimo}</strong><span>Óptimos / leves</span></span>
+                  </div>
+                </div>
+                <div className="repair-progress">
+                  <div className="repair-progress-head">
+                    <span><Wrench size={13} /> Avance de reparación</span>
+                    <strong>{dashStats.repaired} de {dashStats.total} reparados · {dashStats.total ? Math.round((dashStats.repaired / dashStats.total) * 100) : 0}%</strong>
+                  </div>
+                  <div className="repair-bar"><span style={{ width: `${dashStats.total ? (dashStats.repaired / dashStats.total) * 100 : 0}%` }} /></div>
+                </div>
+              </div>
+
+              <div className="dash-grid">
+                <aside className="card filters-card">
+                  <div className="card-title compact">
+                    <div><span className="overline">Filtros</span><h2>Hallazgos</h2></div>
+                    <SlidersHorizontal size={18} />
+                  </div>
+
+                  <div className="filter-group">
+                    <span className="filter-group-label">Criticidad</span>
+                    <div className="filter-list">
+                      {ALL_CRITICALITY.map((value) => (
+                        <button key={value} className={dashCriticality.includes(value) ? "enabled" : ""} onClick={() => toggleDashCriticality(value)}>
+                          <i style={{ background: criticalityColor[value] }} />
+                          <span>{criticalityLabel[value]}</span>
+                          <strong>{value === "critico" ? dashVisibleCritico : value === "moderado" ? dashVisibleModerado : dashVisibleOptimo}</strong>
+                          <em>{dashCriticality.includes(value) && <Check size={11} />}</em>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="filter-group">
+                    <span className="filter-group-label">Tipo de hallazgo</span>
+                    <div className="filter-list">
+                      {availableDashLabels.map((label) => (
+                        <button key={label} className={dashLabels.includes(label) ? "enabled" : ""} onClick={() => toggleDashLabel(label)}>
+                          <i style={{ background: colorForLabel[label] ?? fallbackColor }} />
+                          <span>{label}</span>
+                          <strong>{dashLabelCounts[label] ?? 0}</strong>
+                          <em>{dashLabels.includes(label) && <Check size={11} />}</em>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="filter-group">
+                    <span className="filter-group-label">Estado</span>
+                    <div className="filter-list">
+                      <button className={dashReview.includes("confirmed") ? "enabled" : ""} onClick={() => toggleDashReview("confirmed")}>
+                        <i style={{ background: "#c9d0d3" }} /><span>Confirmado</span><strong>{dashReviewCounts.confirmed}</strong>
+                        <em>{dashReview.includes("confirmed") && <Check size={11} />}</em>
+                      </button>
+                      <button className={dashReview.includes("pending") ? "enabled" : ""} onClick={() => toggleDashReview("pending")}>
+                        <i style={{ background: "#c9d0d3" }} /><span>Pendiente</span><strong>{dashReviewCounts.pending}</strong>
+                        <em>{dashReview.includes("pending") && <Check size={11} />}</em>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="filter-group">
+                    <span className="filter-group-label">Reparación</span>
+                    <div className="filter-list">
+                      <button className={dashRepair.includes("pending") ? "enabled" : ""} onClick={() => toggleDashRepair("pending")}>
+                        <i style={{ background: "#a16207" }} /><span>Pendiente de reparación</span><strong>{dashRepairCounts.pending}</strong>
+                        <em>{dashRepair.includes("pending") && <Check size={11} />}</em>
+                      </button>
+                      <button className={dashRepair.includes("repaired") ? "enabled" : ""} onClick={() => toggleDashRepair("repaired")}>
+                        <i style={{ background: "#167d72" }} /><span>Reparado</span><strong>{dashRepairCounts.repaired}</strong>
+                        <em>{dashRepair.includes("repaired") && <Check size={11} />}</em>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="field-mini">
+                    <label>
+                      <span>Misión / tramo</span>
+                      <span className="select-wrap">
+                        <select value={dashMission} onChange={(event) => setDashMission(event.target.value)}>
+                          <option value="">Todas las misiones</option>
+                          {dashMissionOptions.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.segment}</option>)}
+                        </select>
+                        <ChevronDown size={12} />
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="stats-mini">
+                    <div><ScanLine size={15} /><span>Visibles</span><strong>{dashVisible.length}</strong></div>
+                    <div><Mountain size={15} /><span>Misiones</span><strong>{dashMissionOptions.length}</strong></div>
+                  </div>
+                </aside>
+
+                <div className="card dash-map-card">
+                  <div className="dash-map-heading">
+                    <div>
+                      <MapPin size={16} style={{ marginTop: 1 }} />
+                      <span><strong>Mapa de hallazgos</strong><small>Sectores del camino con anomalías detectadas</small></span>
+                    </div>
+                    <span className="pill">{dashVisible.length} en vista</span>
+                  </div>
+                  <div className="legend-row">
+                    <span className="legend-chip" style={{ background: "#fff1ef", color: "#8f3f31" }}><i style={{ background: "#c0392b" }} />Crítico · {dashVisibleCritico}</span>
+                    <span className="legend-chip" style={{ background: "#fef3c7", color: "#a16207" }}><i style={{ background: "#a16207" }} />Moderado · {dashVisibleModerado}</span>
+                    <span className="legend-chip" style={{ background: "#e2f6f2", color: "#167d72" }}><i style={{ background: "#167d72" }} />Óptimo · {dashVisibleOptimo}</span>
+                    <span className="legend-chip" style={{ background: "#eef2f3", color: "#4c5962" }}><Check size={9} />Reparado · {dashVisibleRepaired}</span>
+                  </div>
+                  <DashboardMap findings={dashVisible} selectedId={dashSelectedId} onSelect={(finding) => setDashSelectedId(finding.id)} />
+                </div>
+
+                <aside className="card detail-card">
+                  {selectedFinding && selectedCriticality ? (
+                    <>
+                      <div className="card-title compact">
+                        <div><span className="overline">Punto seleccionado</span><h2>Detalle</h2></div>
+                        <span className="crit-tag" style={{ background: `${criticalityColor[selectedCriticality]}1a`, color: criticalityColor[selectedCriticality] }}><i />{criticalityLabel[selectedCriticality]}</span>
+                      </div>
+
+                      <div className="detail-thumb">
+                        <img src={api.imageUrl(selectedFinding.image_url)} alt={selectedFinding.label} />
+                        <span className="label-tag">{selectedFinding.label} · {confidence(selectedFinding.confidence)}</span>
+                      </div>
+
+                      <div className="detail-body">
+                        <h3>{selectedFinding.mission_name}</h3>
+                        <p className="seg">{selectedFinding.mission_segment}</p>
+
+                        <div className="status-pills">
+                          <span className="status-pill" style={{ background: selectedFinding.review_status === "confirmed" ? "#e2f6f2" : "#fef3c7", color: selectedFinding.review_status === "confirmed" ? "#167d72" : "#a16207" }}>
+                            {selectedFinding.review_status === "confirmed" ? <Check size={9} /> : <CircleDot size={9} />}
+                            {selectedFinding.review_status === "confirmed" ? "Confirmado" : "Pendiente de revisión"}
+                          </span>
+                          <span className="status-pill" style={{ background: selectedFinding.repair_status === "repaired" ? "#e2f6f2" : "#fef3c7", color: selectedFinding.repair_status === "repaired" ? "#167d72" : "#a16207" }}>
+                            {selectedFinding.repair_status === "repaired" ? <Wrench size={9} /> : <Clock size={9} />}
+                            {selectedFinding.repair_status === "repaired" ? "Reparado" : "Pendiente de reparación"}
+                          </span>
+                        </div>
+
+                        <div className="detail-rows">
+                          <div className="detail-row">
+                            <MapPin size={14} />
+                            <div><span className="field-label">Coordenadas</span><strong className="field-value">{selectedFinding.latitude !== null ? `${selectedFinding.latitude.toFixed(6)}, ${selectedFinding.longitude?.toFixed(6)}` : "Sin coordenadas EXIF"}</strong></div>
+                          </div>
+                          <div className="detail-row">
+                            <Calendar size={14} />
+                            <div><span className="field-label">Detectado</span><strong className="field-value">{formatDateTime(selectedFinding.created_at)}</strong></div>
+                          </div>
+                          <div className="detail-row">
+                            <FileImage size={14} />
+                            <div><span className="field-label">Imagen</span><strong className="field-value">{selectedFinding.image_filename}</strong></div>
+                          </div>
+                        </div>
+
+                        <div className="detail-conf">
+                          <div><span>Confianza del modelo</span><strong>{confidence(selectedFinding.confidence)}</strong></div>
+                          <div className="confidence-line"><span style={{ width: confidence(selectedFinding.confidence), background: criticalityColor[selectedCriticality] }} /></div>
+                        </div>
+                      </div>
+
+                      <div className="detail-actions">
+                        <button
+                          className={selectedFinding.repair_status === "repaired" ? "button secondary full" : "button positive full"}
+                          disabled={repairBusyId === selectedFinding.id || (selectedFinding.repair_status !== "repaired" && selectedFinding.review_status !== "confirmed")}
+                          title={selectedFinding.repair_status !== "repaired" && selectedFinding.review_status !== "confirmed" ? "Solo se pueden marcar como reparados los hallazgos confirmados" : undefined}
+                          onClick={() => toggleRepairStatus(selectedFinding)}
+                        >
+                          {repairBusyId === selectedFinding.id ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
+                          {selectedFinding.repair_status === "repaired" ? "Marcar como pendiente" : "Marcar como reparada"}
+                        </button>
+                        <button className="button secondary full" onClick={() => goToFindingMission(selectedFinding)} disabled={busy === "open"}>
+                          Ver misión completa <ArrowRight size={14} />
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="detail-empty">
+                      <MapPin size={22} />
+                      <strong>Selecciona un punto</strong>
+                      <span>Haz clic en un marcador del mapa para ver el detalle del hallazgo.</span>
+                    </div>
+                  )}
+                </aside>
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -482,7 +830,7 @@ export default function App() {
                   <small><span>50%</span><span>95%</span></small>
                 </div>
                 <div className="stats-mini">
-                  <div><ScanLine size={15} /><span>Visibles</span><strong>{filteredAll.length}</strong></div>
+                     <div><ScanLine size={15} /><span>Visibles</span><strong>{filteredAll.length}</strong></div>
                   <div><CircleDot size={15} /><span>Pendientes</span><strong>{pending}</strong></div>
                   <div><CheckCircle2 size={15} /><span>Confirmadas</span><strong>{confirmed}</strong></div>
                 </div>
@@ -493,7 +841,7 @@ export default function App() {
                   <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><span className="pill">{visibleDetections.length} hallazgos</span></div>
                   <div className="image-stage">
                     <img src={api.imageUrl(selectedImage.image_url)} alt="Camino minero bajo revisión" />
-                    {visibleDetections.map((item) => <button key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }} onClick={() => updateReview(item, item.review_status === "confirmed" ? "pending" : "confirmed")}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</button>)}
+                    {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</div>)}
                     <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
                   </div>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
@@ -507,10 +855,10 @@ export default function App() {
                   {selectedImage.detections.map((item) => <div className={`detection-item ${item.review_status}`} key={item.id}>
                     <div><i style={{ background: colorForLabel[item.label] ?? fallbackColor }} /><strong>{item.label}</strong><span>{confidence(item.confidence)}</span></div>
                     <div className="confidence-line"><span style={{ width: confidence(item.confidence), background: colorForLabel[item.label] ?? fallbackColor }} /></div>
-                    <div className="review-actions">
-                      <button className={item.review_status === "confirmed" ? "active confirm" : ""} onClick={() => updateReview(item, "confirmed")}><Check size={13} /> Confirmar</button>
-                      <button className={item.review_status === "rejected" ? "active reject" : ""} onClick={() => updateReview(item, "rejected")}><XCircle size={13} /> Descartar</button>
-                    </div>
+                    <span className="status-pill" style={{ marginTop: 2, background: item.review_status === "confirmed" ? "#e2f6f2" : item.review_status === "rejected" ? "#fdecea" : "#fef3c7", color: item.review_status === "confirmed" ? "#167d72" : item.review_status === "rejected" ? "#c0392b" : "#a16207" }}>
+                      {item.review_status === "confirmed" ? <Check size={9} /> : item.review_status === "rejected" ? <XCircle size={9} /> : <CircleDot size={9} />}
+                      {item.review_status === "confirmed" ? "Confirmado" : item.review_status === "rejected" ? "Descartado" : "Pendiente"}
+                    </span>
                   </div>)}
                 </div>
                 <button className="button primary full" onClick={() => setView("report")}><FileText size={16} /> Preparar informe</button>

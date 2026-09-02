@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.missions import router as missions_router
+from app.api.dashboard import router as dashboard_router
 from app.config import settings
 from app.database import create_db_and_tables
 from app.schemas import HealthRead
@@ -38,3 +39,4 @@ def health() -> HealthRead:
 
 
 app.include_router(missions_router, prefix=settings.api_prefix)
+app.include_router(dashboard_router, prefix=settings.api_prefix)

@@ -1,4 +1,5 @@
 export type ReviewStatus = "pending" | "confirmed" | "rejected";
+export type RepairStatus = "pending" | "repaired";
 
 export type Detection = {
   id: string;
@@ -9,6 +10,8 @@ export type Detection = {
   width: number;
   height: number;
   review_status: ReviewStatus;
+  repair_status: RepairStatus;
+  created_at: string;
 };
 
 export type MissionImage = {
@@ -41,6 +44,27 @@ export type MissionSummary = {
   detection_count: number;
   pending_count: number;
   confirmed_count: number;
+};
+
+export type DashboardFinding = {
+  id: string;
+  label: string;
+  confidence: number;
+  review_status: ReviewStatus;
+  repair_status: RepairStatus;
+  created_at: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  image_id: string;
+  image_filename: string;
+  image_url: string;
+  latitude: number | null;
+  longitude: number | null;
+  mission_id: string;
+  mission_name: string;
+  mission_segment: string;
 };
 
 export type Health = {

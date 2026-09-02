@@ -1,4 +1,4 @@
-import type { Detection, Health, Mission, MissionSummary, ReviewStatus } from "./types";
+import type { DashboardFinding, Detection, Health, Mission, MissionSummary, RepairStatus, ReviewStatus } from "./types";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 
@@ -43,6 +43,15 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ review_status: reviewStatus })
     }),
+
+  updateRepairStatus: (missionId: string, detectionId: string, repairStatus: RepairStatus) =>
+    request<Detection>(`/missions/${missionId}/detections/${detectionId}/repair`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repair_status: repairStatus })
+    }),
+
+  dashboardFindings: () => request<DashboardFinding[]>("/dashboard/findings"),
 
   imageUrl: (path: string) => `${API_URL.replace(/\/api\/v1$/, "")}${path}`,
 

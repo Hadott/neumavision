@@ -10,7 +10,7 @@ from sqlmodel import Session, delete, select
 from app.config import settings
 from app.database import get_session
 from app.models import Detection, Mission, MissionImage
-from app.schemas import DetectionRead, DetectionReview, ImageRead, MissionRead, MissionSummary
+from app.schemas import DetectionRead, DetectionRepairUpdate, DetectionReview, ImageRead, MissionRead, MissionSummary
 from app.services.detector import get_detector
 from app.services.metadata import extract_gps
 from app.services.report import build_report
@@ -206,6 +206,29 @@ def review_detection(
     if not detection:
         raise HTTPException(status_code=404, detail="Detection not found")
     detection.review_status = payload.review_status
+    session.add(detection)
+    session.commit()
+    session.refresh(detection)
+    return DetectionRead.model_validate(detection, from_attributes=True)
+
+
+@router.patch("/{mission_id}/detections/{detection_id}/repair", response_model=DetectionRead)
+def update_repair_status(
+    mission_id: str,
+    detection_id: str,
+    payload: DetectionRepairUpdate,
+    session: Session = Depends(get_session),
+) -> DetectionRead:
+    require_mission(session, mission_id)
+    detection = session.get(Detection, detection_id)
+    if not detection:
+        raise HTTPException(status_code=404, detail="Detection not found")
+    if payload.repair_status == "repaired" and detection.review_status != "confirmed":
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se pueden marcar como reparados los hallazgos confirmados",
+        )
+    detection.repair_status = payload.repair_status
     session.add(detection)
     session.commit()
     session.refresh(detection)

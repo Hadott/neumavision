@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 
 ReviewStatus = Literal["pending", "confirmed", "rejected"]
+RepairStatus = Literal["pending", "repaired"]
 
 
 class DetectionRead(BaseModel):
@@ -16,6 +17,8 @@ class DetectionRead(BaseModel):
     width: float
     height: float
     review_status: ReviewStatus
+    repair_status: RepairStatus
+    created_at: datetime
 
 
 class ImageRead(BaseModel):
@@ -52,6 +55,31 @@ class MissionSummary(BaseModel):
 
 class DetectionReview(BaseModel):
     review_status: ReviewStatus
+
+
+class DetectionRepairUpdate(BaseModel):
+    repair_status: RepairStatus
+
+
+class DashboardFinding(BaseModel):
+    id: str
+    label: str
+    confidence: float
+    review_status: ReviewStatus
+    repair_status: RepairStatus
+    created_at: datetime
+    x: float
+    y: float
+    width: float
+    height: float
+    image_id: str
+    image_filename: str
+    image_url: str
+    latitude: float | None
+    longitude: float | None
+    mission_id: str
+    mission_name: str
+    mission_segment: str
 
 
 class HealthRead(BaseModel):

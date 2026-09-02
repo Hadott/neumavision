@@ -37,4 +37,6 @@ class Detection(SQLModel, table=True):
     y: float
     width: float
     height: float
-    review_status: str = Field(default="pending", index=True, max_length=30)
+    review_status: str = Field(default="confirmed", index=True, max_length=30)
+    repair_status: str = Field(default="pending", index=True, max_length=30)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
