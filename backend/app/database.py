@@ -1,20 +1,13 @@
-from pathlib import Path
-
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, create_engine, select
 
 from app.config import settings
 from app.models import Faena
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+engine = create_engine(settings.database_url, pool_pre_ping=True)
 
 
-def create_db_and_tables() -> None:
-    if settings.database_url.startswith("sqlite"):
-        database_path = settings.database_url.removeprefix("sqlite:///")
-        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
-    SQLModel.metadata.create_all(engine)
+def ensure_development_faena() -> None:
     with Session(engine) as session:
         faena = session.exec(select(Faena).where(Faena.id_faena == settings.development_faena_id)).first()
         if faena is None:

@@ -6,7 +6,7 @@ Plataforma desacoplada para inspeccionar caminos mineros mediante imágenes RGB 
 
 - `backend/`: FastAPI + SQLModel en Python.
 - `frontend/`: React + TypeScript + Vite.
-- Base de datos local: SQLite. Se cambia a PostgreSQL o Supabase mediante `DATABASE_URL`.
+- Base de datos: PostgreSQL en Amazon RDS mediante `DATABASE_URL`.
 - Detector inicial: adaptador simulado. La clase `YoloDetector` queda preparada para integrar un modelo de Ultralytics.
 - Informes: PDF generado en el backend con ReportLab.
 - Geolocalización: lectura automática de coordenadas GPS desde EXIF.

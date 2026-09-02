@@ -1,6 +1,6 @@
 # 🗄️ Configurar AWS RDS PostgreSQL
 
-Tu proyecto ha sido actualizado para usar **AWS RDS PostgreSQL** en lugar de SQLite.
+Tu proyecto utiliza **AWS RDS PostgreSQL** como base de datos.
 
 ## 📋 Paso 1: Crear RDS en AWS Console
 
