@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     development_faena_id: str = "00000000-0000-0000-0000-000000000001"
     development_faena_name: str = "Faena de desarrollo"
-    development_faena_email: str = "desarrollo@neumavision.local"
+    development_faena_email: str = "admin@admin.com"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
