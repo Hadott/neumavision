@@ -62,7 +62,7 @@ Backend
    |
    v
 Servicio de inferencia YOLO
-Docker en Amazon EC2
+Amazon EC2
    |
    v
 best.pt
@@ -104,7 +104,7 @@ Responsabilidades:
 
 ### Servicio de inferencia
 
-Se ejecutará en Amazon EC2 dentro de Docker.
+Se ejecutará en Amazon EC2.
 
 Contendrá:
 
@@ -147,7 +147,7 @@ Este servicio no entrena el modelo. Solo utiliza el modelo ya entrenado para hac
 
 ### Amazon EC2
 
-Ejecutará el servicio de inferencia YOLO dentro de Docker.
+Ejecutará el servicio de inferencia YOLO.
 
 ### Amazon S3
 
@@ -434,7 +434,6 @@ rock_detector/
 ├── backend/
 ├── inference/
 ├── docs/
-├── docker-compose.yml
 ├── PROJECT_CONTEXT.md
 ├── AGENTS.md
 └── README.md
@@ -453,18 +452,6 @@ backend/
     ├── database/
     └── core/
 ```
-
-## 12. Docker
-
-Se planea dockerizar:
-
-- Frontend.
-- Backend.
-- Servicio de inferencia.
-
-No dockerizar en producción:
-
-- PostgreSQL.
 
 La base de datos estará en Amazon RDS.
 
@@ -506,8 +493,7 @@ RabbitMQ, SQS u otras colas pueden evaluarse posteriormente si el volumen de im�
 16. Informe PDF.
 17. Autenticación y aislamiento por faena.
 18. Pruebas.
-19. Docker.
-20. Despliegue en AWS.
+19. Despliegue en AWS.
 
 ## 15. Estado actual
 
@@ -518,6 +504,6 @@ Actualmente:
 - Se decidió utilizar AWS en lugar de Supabase.
 - La base de datos será Amazon RDS PostgreSQL.
 - Las imágenes estarán en Amazon S3.
-- La inferencia YOLO se ejecutará en EC2 utilizando Docker.
+- La inferencia YOLO se ejecutará en EC2.
 - El MER básico está definido.
 - Aún se debe terminar el diseño de requisitos funcionales y API antes de implementar todo el backend.

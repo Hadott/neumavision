@@ -9,7 +9,7 @@ from sqlmodel import Session, delete, select
 
 from app.config import settings
 from app.database import get_session
-from app.models import Detection, Mission, MissionImage
+from app.models import Deteccion, Imagen, Mision
 from app.schemas import DetectionRead, DetectionReview, ImageRead, MissionRead, MissionSummary
 from app.services.detector import get_detector
 from app.services.metadata import extract_gps
@@ -20,35 +20,53 @@ from app.services.storage import ALLOWED_CONTENT_TYPES, mission_directory, save_
 router = APIRouter(prefix="/missions", tags=["missions"])
 
 
-def serialize_mission(session: Session, mission: Mission) -> MissionRead:
-    images = session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all()
+def serialize_detection(detection: Deteccion) -> DetectionRead:
+    return DetectionRead(
+        id=detection.id_deteccion,
+        label=detection.clase,
+        confidence=detection.confianza,
+        x=detection.bbox_x,
+        y=detection.bbox_y,
+        width=detection.bbox_ancho,
+        height=detection.bbox_alto,
+        review_status=detection.estado_revision,
+    )
+
+
+def serialize_mission(session: Session, mission: Mision) -> MissionRead:
+    images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
     image_payload: list[ImageRead] = []
     for image in images:
-        detections = session.exec(select(Detection).where(Detection.image_id == image.id)).all()
+        detections = session.exec(select(Deteccion).where(Deteccion.id_imagen == image.id_imagen)).all()
         image_payload.append(
             ImageRead(
-                id=image.id,
-                filename=image.filename,
-                width=image.width,
-                height=image.height,
-                latitude=image.latitude,
-                longitude=image.longitude,
-                image_url=f"/api/v1/missions/{mission.id}/images/{image.id}",
-                detections=[DetectionRead.model_validate(item, from_attributes=True) for item in detections],
+                id=image.id_imagen,
+                filename=image.nombre_archivo,
+                width=image.ancho,
+                height=image.alto,
+                latitude=image.latitud,
+                longitude=image.longitud,
+                image_url=f"/api/v1/missions/{mission.id_mision}/images/{image.id_imagen}",
+                detections=[serialize_detection(item) for item in detections],
             )
         )
     return MissionRead(
-        id=mission.id,
-        name=mission.name,
-        segment=mission.segment,
-        status=mission.status,
-        created_at=mission.created_at,
+        id=mission.id_mision,
+        name=mission.nombre,
+        segment=mission.tramo,
+        status=mission.estado,
+        created_at=mission.fecha_creacion,
         images=image_payload,
     )
 
 
-def require_mission(session: Session, mission_id: str) -> Mission:
-    mission = session.get(Mission, mission_id)
+def require_mission(session: Session, mission_id: str) -> Mision:
+    mission = session.exec(
+        select(Mision).where(
+            Mision.id_mision == mission_id,
+            Mision.id_faena == settings.development_faena_id,
+        )
+    ).first()
     if not mission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mission not found")
     return mission
@@ -67,12 +85,12 @@ async def create_mission(
     if invalid:
         raise HTTPException(status_code=415, detail=f"Unsupported files: {', '.join(str(item) for item in invalid)}")
 
-    mission = Mission(name=name, segment=segment)
+    mission = Mision(id_faena=settings.development_faena_id, nombre=name, tramo=segment)
     session.add(mission)
     session.commit()
     session.refresh(mission)
     for upload in files:
-        target = await save_upload(mission.id, upload)
+        target = await save_upload(mission.id_mision, upload)
         try:
             with Image.open(target) as image:
                 width, height = image.size
@@ -81,15 +99,15 @@ async def create_mission(
             target.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail=f"Invalid image: {upload.filename}") from error
         session.add(
-            MissionImage(
-                mission_id=mission.id,
-                filename=upload.filename or target.name,
-                stored_path=str(target),
-                content_type=upload.content_type or "image/jpeg",
-                width=width,
-                height=height,
-                latitude=latitude,
-                longitude=longitude,
+            Imagen(
+                id_mision=mission.id_mision,
+                nombre_archivo=upload.filename or target.name,
+                ruta_almacenada=str(target),
+                tipo_contenido=upload.content_type or "image/jpeg",
+                ancho=width,
+                alto=height,
+                latitud=latitude,
+                longitud=longitude,
             )
         )
     session.commit()
@@ -98,11 +116,15 @@ async def create_mission(
 
 @router.post("/demo", response_model=MissionRead, status_code=status.HTTP_201_CREATED)
 def create_demo_mission(session: Session = Depends(get_session)) -> MissionRead:
-    mission = Mission(name="Misión demostrativa", segment="Tramo A · km 2,4–3,0")
+    mission = Mision(
+        id_faena=settings.development_faena_id,
+        nombre="Misión demostrativa",
+        tramo="Tramo A · km 2,4–3,0",
+    )
     session.add(mission)
     session.commit()
     session.refresh(mission)
-    directory = mission_directory(mission.id)
+    directory = mission_directory(mission.id_mision)
     for index in range(4):
         image = Image.new("RGB", (1200, 700), (138, 169, 179))
         draw = ImageDraw.Draw(image)
@@ -114,15 +136,15 @@ def create_demo_mission(session: Session = Depends(get_session)) -> MissionRead:
         path = directory / f"DJI_DEMO_{index + 1:04}.jpg"
         image.save(path, "JPEG", quality=88)
         session.add(
-            MissionImage(
-                mission_id=mission.id,
-                filename=path.name,
-                stored_path=str(path),
-                content_type="image/jpeg",
-                width=1200,
-                height=700,
-                latitude=-27.38142 - index * 0.00031,
-                longitude=-70.28761 + index * 0.00035,
+            Imagen(
+                id_mision=mission.id_mision,
+                nombre_archivo=path.name,
+                ruta_almacenada=str(path),
+                tipo_contenido="image/jpeg",
+                ancho=1200,
+                alto=700,
+                latitud=-27.38142 - index * 0.00031,
+                longitud=-70.28761 + index * 0.00035,
             )
         )
     session.commit()
@@ -131,27 +153,31 @@ def create_demo_mission(session: Session = Depends(get_session)) -> MissionRead:
 
 @router.get("", response_model=list[MissionSummary])
 def list_missions(session: Session = Depends(get_session)) -> list[MissionSummary]:
-    missions = session.exec(select(Mission).order_by(Mission.created_at.desc())).all()
+    missions = session.exec(
+        select(Mision)
+        .where(Mision.id_faena == settings.development_faena_id)
+        .order_by(Mision.fecha_creacion.desc())
+    ).all()
     summaries: list[MissionSummary] = []
     for mission in missions:
-        images = session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all()
-        image_ids = [image.id for image in images]
+        images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
+        image_ids = [image.id_imagen for image in images]
         detections = (
-            session.exec(select(Detection).where(Detection.image_id.in_(image_ids))).all()
+            session.exec(select(Deteccion).where(Deteccion.id_imagen.in_(image_ids))).all()
             if image_ids
             else []
         )
         summaries.append(
             MissionSummary(
-                id=mission.id,
-                name=mission.name,
-                segment=mission.segment,
-                status=mission.status,
-                created_at=mission.created_at,
+                id=mission.id_mision,
+                name=mission.nombre,
+                segment=mission.tramo,
+                status=mission.estado,
+                created_at=mission.fecha_creacion,
                 image_count=len(images),
                 detection_count=len(detections),
-                pending_count=sum(1 for item in detections if item.review_status == "pending"),
-                confirmed_count=sum(1 for item in detections if item.review_status == "confirmed"),
+                pending_count=sum(1 for item in detections if item.estado_revision == "pending"),
+                confirmed_count=sum(1 for item in detections if item.estado_revision == "confirmed"),
             )
         )
     return summaries
@@ -165,11 +191,11 @@ def get_mission(mission_id: str, session: Session = Depends(get_session)) -> Mis
 @router.delete("/{mission_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_mission(mission_id: str, session: Session = Depends(get_session)) -> Response:
     mission = require_mission(session, mission_id)
-    images = session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all()
-    image_ids = [image.id for image in images]
+    images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
+    image_ids = [image.id_imagen for image in images]
     if image_ids:
-        session.exec(delete(Detection).where(Detection.image_id.in_(image_ids)))
-    session.exec(delete(MissionImage).where(MissionImage.mission_id == mission.id))
+        session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
+    session.exec(delete(Imagen).where(Imagen.id_mision == mission.id_mision))
     session.delete(mission)
     session.commit()
     shutil.rmtree(settings.upload_dir / mission_id, ignore_errors=True)
@@ -179,15 +205,25 @@ def delete_mission(mission_id: str, session: Session = Depends(get_session)) -> 
 @router.post("/{mission_id}/detect", response_model=MissionRead)
 def detect_mission(mission_id: str, session: Session = Depends(get_session)) -> MissionRead:
     mission = require_mission(session, mission_id)
-    images = session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all()
-    image_ids = [image.id for image in images]
+    images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
+    image_ids = [image.id_imagen for image in images]
     if image_ids:
-        session.exec(delete(Detection).where(Detection.image_id.in_(image_ids)))
+        session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
     detector = get_detector()
     for image in images:
-        for prediction in detector.predict(Path(image.stored_path)):
-            session.add(Detection(image_id=image.id, **prediction.__dict__))
-    mission.status = "review"
+        for prediction in detector.predict(Path(image.ruta_almacenada)):
+            session.add(
+                Deteccion(
+                    id_imagen=image.id_imagen,
+                    clase=prediction.label,
+                    confianza=prediction.confidence,
+                    bbox_x=prediction.x,
+                    bbox_y=prediction.y,
+                    bbox_ancho=prediction.width,
+                    bbox_alto=prediction.height,
+                )
+            )
+    mission.estado = "review"
     session.add(mission)
     session.commit()
     session.refresh(mission)
@@ -202,34 +238,39 @@ def review_detection(
     session: Session = Depends(get_session),
 ) -> DetectionRead:
     require_mission(session, mission_id)
-    detection = session.get(Detection, detection_id)
-    if not detection:
+    detection = session.get(Deteccion, detection_id)
+    image = session.get(Imagen, detection.id_imagen) if detection else None
+    if not detection or not image or image.id_mision != mission_id:
         raise HTTPException(status_code=404, detail="Detection not found")
-    detection.review_status = payload.review_status
+    detection.estado_revision = payload.review_status
     session.add(detection)
     session.commit()
     session.refresh(detection)
-    return DetectionRead.model_validate(detection, from_attributes=True)
+    return serialize_detection(detection)
 
 
 @router.get("/{mission_id}/images/{image_id}")
 def get_image(mission_id: str, image_id: str, session: Session = Depends(get_session)) -> FileResponse:
     require_mission(session, mission_id)
-    image = session.get(MissionImage, image_id)
-    if not image or image.mission_id != mission_id:
+    image = session.get(Imagen, image_id)
+    if not image or image.id_mision != mission_id:
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(image.stored_path, media_type=image.content_type, filename=image.filename)
+    return FileResponse(
+        image.ruta_almacenada,
+        media_type=image.tipo_contenido,
+        filename=image.nombre_archivo,
+    )
 
 
 @router.get("/{mission_id}/report")
 def get_report(mission_id: str, session: Session = Depends(get_session)) -> Response:
     mission = require_mission(session, mission_id)
-    images = list(session.exec(select(MissionImage).where(MissionImage.mission_id == mission.id)).all())
-    image_ids = [image.id for image in images]
-    detections = list(session.exec(select(Detection).where(Detection.image_id.in_(image_ids))).all()) if image_ids else []
+    images = list(session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all())
+    image_ids = [image.id_imagen for image in images]
+    detections = list(session.exec(select(Deteccion).where(Deteccion.id_imagen.in_(image_ids))).all()) if image_ids else []
     report = build_report(mission, images, detections)
     return Response(
         content=report,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="informe-{mission.id[:8]}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="informe-{mission.id_mision[:8]}.pdf"'},
     )

@@ -12,20 +12,6 @@ Plataforma desacoplada para inspeccionar caminos mineros mediante imágenes RGB 
 - Geolocalización: lectura automática de coordenadas GPS desde EXIF.
 - Mapa: visualización interactiva de hallazgos con React Leaflet y OpenStreetMap.
 
-## Inicio rápido con Docker
-
-Requiere Docker Desktop.
-
-```bash
-docker compose up --build
-```
-
-Luego abre:
-
-- Interfaz: http://localhost:5173
-- Documentación de la API: http://localhost:8000/docs
-- Estado del backend: http://localhost:8000/api/v1/health
-
 ## Inicio manual
 
 ### Backend
@@ -81,7 +67,7 @@ YOLO_MODEL_PATH=./models/best.pt
 
 La API y el frontend no necesitan cambios porque el detector se reemplaza mediante el adaptador ubicado en `backend/app/services/detector.py`.
 
-## Conectar PostgreSQL o Supabase
+## Conectar PostgreSQL
 
 Configura `DATABASE_URL` en `backend/.env`:
 
@@ -89,7 +75,15 @@ Configura `DATABASE_URL` en `backend/.env`:
 DATABASE_URL=postgresql+psycopg://usuario:clave@host:5432/postgres
 ```
 
-SQLModel crea las tablas al iniciar. Para producción se recomienda agregar Alembic para controlar migraciones.
+El esquema se controla con Alembic. Antes de iniciar el backend manualmente, aplica las migraciones:
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+Hasta que se implemente `POST /auth/login`, las misiones se asocian a una faena de desarrollo definida mediante
+`DEVELOPMENT_FAENA_ID`. Este valor es una compatibilidad temporal y no reemplaza la autenticación.
 
 ## Endpoints principales
 

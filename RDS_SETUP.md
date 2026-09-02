@@ -51,7 +51,7 @@ Abre o crea `backend/.env`:
 APP_NAME=NeumaDiesel Vision API
 ENVIRONMENT=development
 API_PREFIX=/api/v1
-DATABASE_URL=postgresql://postgres:PASSWORD@neumavision-db.XXXXXXXX.us-east-1.rds.amazonaws.com:5432/neumavision
+DATABASE_URL=postgresql+psycopg://postgres:PASSWORD@neumavision-db.XXXXXXXX.us-east-1.rds.amazonaws.com:5432/neumavision
 UPLOAD_DIR=./data/uploads
 DETECTOR_MODE=mock
 YOLO_MODEL_PATH=./models/best.pt
@@ -107,23 +107,6 @@ Abre:
 
 ---
 
-## 🐳 Paso 6: Docker Compose (Desarrollo Local)
-
-Si quieres usar Docker Compose pero conectar a RDS en la nube:
-
-```bash
-# Copia .env.example a .env
-copy backend\.env.example backend\.env
-
-# Actualiza DATABASE_URL en backend/.env con tu RDS
-# Nota: host.docker.internal funciona para conectar desde container a host local
-# Para RDS en AWS, usa directamente el endpoint
-
-docker compose up --build
-```
-
----
-
 ## 📊 Verificar que las Tablas se Crearon
 
 Puedes conectarte a RDS desde tu máquina con pgAdmin o psql:
@@ -164,7 +147,6 @@ Cuando despliegues a producción:
 ✅ **Actualizado**:
 - `backend/.env.example` - DATABASE_URL apunta a RDS
 - `backend/app/config.py` - Default es PostgreSQL
-- `docker-compose.yml` - DATABASE_URL es RDS
 
 ✅ **Sin cambios** (ya son compatibles):
 - `backend/app/database.py` - Detecta PostgreSQL automáticamente
@@ -188,7 +170,7 @@ Cuando despliegues a producción:
 - Si es RDS: verifica Security Group permite tu IP
 
 ### Error: "database does not exist"
-- Las tablas se crean automáticamente al iniciar
+- Ejecuta `alembic upgrade head` desde `backend` para crear o actualizar las tablas
 - Verifica que el nombre `neumavision` es correcto en RDS
 
 ---

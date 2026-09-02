@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.config import settings
+from app.models import Faena
 
 
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
@@ -14,6 +15,18 @@ def create_db_and_tables() -> None:
         database_path = settings.database_url.removeprefix("sqlite:///")
         Path(database_path).parent.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        faena = session.exec(select(Faena).where(Faena.id_faena == settings.development_faena_id)).first()
+        if faena is None:
+            session.add(
+                Faena(
+                    id_faena=settings.development_faena_id,
+                    nombre=settings.development_faena_name,
+                    correo=settings.development_faena_email,
+                    hash_contrasena="authentication-not-implemented",
+                )
+            )
+            session.commit()
 
 
 def get_session():

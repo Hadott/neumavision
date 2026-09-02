@@ -1,6 +1,10 @@
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app.config import settings
+from app.database import engine
 from app.main import app
+from app.models import Mision
 
 
 def test_demo_detection_and_report() -> None:
@@ -13,6 +17,10 @@ def test_demo_detection_and_report() -> None:
         assert demo.status_code == 201
         mission = demo.json()
         assert len(mission["images"]) == 4
+        with Session(engine) as session:
+            stored_mission = session.get(Mision, mission["id"])
+            assert stored_mission is not None
+            assert stored_mission.id_faena == settings.development_faena_id
 
         detected = client.post(f"/api/v1/missions/{mission['id']}/detect")
         assert detected.status_code == 200

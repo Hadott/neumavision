@@ -34,7 +34,6 @@ Antes de realizar cambios importantes, leer también `PROJECT_CONTEXT.md`.
 - Amazon RDS PostgreSQL para base de datos.
 - Amazon S3 para imágenes e informes.
 - Amazon EC2 para el servicio de inferencia.
-- Docker para backend, frontend y servicio de inferencia.
 
 ### IA
 
@@ -283,20 +282,6 @@ Antes de considerar una funcionalidad terminada, probar como mínimo:
 - error de base de datos cuando corresponda.
 
 No es necesario crear una suite enorme al comienzo. Priorizar pruebas del camino crítico.
-
-## Docker
-
-Mantener Dockerfiles simples.
-
-Servicios previstos:
-
-- frontend;
-- backend;
-- inference.
-
-No incluir PostgreSQL de producción dentro del despliegue Docker.
-
-Para desarrollo local sí puede utilizarse PostgreSQL en Docker si facilita el trabajo.
 
 ## Dependencias
 
