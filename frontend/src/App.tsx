@@ -422,7 +422,7 @@ export default function App() {
               <ChevronRight size={13} />
               <span><Layers3 size={14} /> React</span>
               <ChevronRight size={13} />
-              <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
+              <span><Database size={14} /> {health?.database ?? "PostgreSQL"}</span>
             </div>
           </section>
 
@@ -745,7 +745,7 @@ export default function App() {
               <ChevronRight size={13} />
               <span><Layers3 size={14} /> React</span>
               <ChevronRight size={13} />
-              <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
+              <span><Database size={14} /> {health?.database ?? "PostgreSQL"}</span>
             </div>
           </section>
 

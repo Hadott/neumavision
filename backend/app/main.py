@@ -6,14 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.missions import router as missions_router
 from app.api.dashboard import router as dashboard_router
 from app.config import settings
-from app.database import create_db_and_tables
+from app.database import ensure_development_faena
 from app.schemas import HealthRead
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    create_db_and_tables()
+    ensure_development_faena()
     yield
 
 
@@ -34,8 +34,7 @@ app.add_middleware(
 
 @app.get(f"{settings.api_prefix}/health", response_model=HealthRead, tags=["system"])
 def health() -> HealthRead:
-    database = "postgresql" if settings.database_url.startswith("postgresql") else "sqlite"
-    return HealthRead(status="ok", detector=settings.detector_mode, database=database)
+    return HealthRead(status="ok", detector=settings.detector_mode, database="postgresql")
 
 
 app.include_router(missions_router, prefix=settings.api_prefix)

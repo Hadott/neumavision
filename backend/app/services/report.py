@@ -20,7 +20,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from app.models import Detection, Mission, MissionImage
+from app.models import Deteccion, Imagen, Mision
 
 
 LOGO_PATH = Path(__file__).resolve().parents[2] / "assets" / "logo.png"
@@ -126,9 +126,9 @@ def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
 
 
-def _annotate_image(image: MissionImage, image_detections: list[Detection], max_width: int = 1300) -> BytesIO | None:
+def _annotate_image(image: Imagen, image_detections: list[Deteccion], max_width: int = 1300) -> BytesIO | None:
     """Draws bounding boxes for non-rejected detections on a resized copy of the photo."""
-    path = Path(image.stored_path)
+    path = Path(image.ruta_almacenada)
     if not path.exists():
         return None
     try:
@@ -145,15 +145,15 @@ def _annotate_image(image: MissionImage, image_detections: list[Detection], max_
     stroke = max(2, round(photo.width * 0.0035))
 
     for detection in image_detections:
-        if detection.review_status == "rejected":
+        if detection.estado_revision == "rejected":
             continue
-        rgb = _hex_to_rgb(LABEL_COLORS.get(detection.label, FALLBACK_COLOR))
-        left = detection.x * photo.width
-        top = detection.y * photo.height
-        right = left + detection.width * photo.width
-        bottom = top + detection.height * photo.height
+        rgb = _hex_to_rgb(LABEL_COLORS.get(detection.clase, FALLBACK_COLOR))
+        left = detection.bbox_x * photo.width
+        top = detection.bbox_y * photo.height
+        right = left + detection.bbox_ancho * photo.width
+        bottom = top + detection.bbox_alto * photo.height
         draw.rectangle([left, top, right, bottom], outline=rgb, width=stroke)
-        tag = f"{detection.label} · {detection.confidence:.0%}"
+        tag = f"{detection.clase} · {detection.confianza:.0%}"
         text_bbox = draw.textbbox((0, 0), tag, font=label_font)
         tag_w = text_bbox[2] - text_bbox[0] + 12
         tag_h = text_bbox[3] - text_bbox[1] + 8
@@ -294,7 +294,7 @@ def _draw_tire_watermark(canvas, cx: float, cy: float, r_outer: float, alpha: fl
     canvas.restoreState()
 
 
-def build_report(mission: Mission, images: list[MissionImage], detections: list[Detection]) -> bytes:
+def build_report(mission: Mision, images: list[Imagen], detections: list[Deteccion]) -> bytes:
     styles = _styles()
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -304,7 +304,7 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
         leftMargin=18 * mm,
         topMargin=19 * mm,
         bottomMargin=20 * mm,
-        title=f"Informe NeumaVision — {mission.name}",
+        title=f"Informe NeumaVision — {mission.nombre}",
     )
 
     def _cover_decoration(canvas, doc):
@@ -316,13 +316,13 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
         canvas.setFillColor(YELLOW)
         canvas.rect(0, band_h, A4[0], 1.3 * mm, fill=1, stroke=0)
 
-        date_str = mission.created_at.strftime("%d-%m-%Y")
+        date_str = mission.fecha_creacion.strftime("%d-%m-%Y")
         canvas.setFont("Helvetica-Bold", 9)
         canvas.setFillColor(colors.white)
         canvas.drawString(18 * mm, 15.5 * mm, "NEUMADIESEL")
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.HexColor("#c7c9cc"))
-        canvas.drawString(18 * mm, 11 * mm, f"Tramo: {mission.segment}")
+        canvas.drawString(18 * mm, 11 * mm, f"Tramo: {mission.tramo}")
         canvas.drawString(18 * mm, 7 * mm, f"Fecha de misión: {date_str}")
 
         canvas.setFont("Helvetica-Bold", 9)
@@ -346,22 +346,22 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
         canvas.drawString(18 * mm, A4[1] - 9.3 * mm, "NEUMAVISION")
         canvas.setFont("Helvetica", 7.5)
         canvas.setFillColor(colors.white)
-        label = mission.name if len(mission.name) <= 58 else mission.name[:55] + "..."
+        label = mission.nombre if len(mission.nombre) <= 58 else mission.nombre[:55] + "..."
         canvas.drawRightString(A4[0] - 18 * mm, A4[1] - 9.3 * mm, f"Informe de Inspección de Caminos · {label}")
         canvas.restoreState()
         _footer(canvas, doc)
 
-    by_image: dict[str, list[Detection]] = {}
+    by_image: dict[str, list[Deteccion]] = {}
     for detection in detections:
-        by_image.setdefault(detection.image_id, []).append(detection)
+        by_image.setdefault(detection.id_imagen, []).append(detection)
 
-    active = [d for d in detections if d.review_status != "rejected"]
-    discarded = [d for d in detections if d.review_status == "rejected"]
-    confirmed = [d for d in active if d.review_status == "confirmed"]
-    pending = [d for d in active if d.review_status == "pending"]
-    counts = Counter(d.label for d in active)
-    average_confidence = sum(d.confidence for d in active) / len(active) if active else 0.0
-    located = sum(1 for image in images if image.latitude is not None and image.longitude is not None)
+    active = [d for d in detections if d.estado_revision != "rejected"]
+    discarded = [d for d in detections if d.estado_revision == "rejected"]
+    confirmed = [d for d in active if d.estado_revision == "confirmed"]
+    pending = [d for d in active if d.estado_revision == "pending"]
+    counts = Counter(d.clase for d in active)
+    average_confidence = sum(d.confianza for d in active) / len(active) if active else 0.0
+    located = sum(1 for image in images if image.latitud is not None and image.longitud is not None)
 
     story = []
 
@@ -375,7 +375,7 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
         top_row_cells.append(Paragraph("", styles["muted"]))
     tag_style = ParagraphStyle("coverTag", parent=styles["muted"], alignment=2, fontSize=8.5, leading=12)
     top_row_cells.append(Paragraph(
-        f"<b>INFORME TÉCNICO</b><br/>Sistema NeumaVision · {mission.created_at.year}",
+        f"<b>INFORME TÉCNICO</b><br/>Sistema NeumaVision · {mission.fecha_creacion.year}",
         tag_style,
     ))
     top_row = Table([top_row_cells], colWidths=[80 * mm, 76 * mm])
@@ -391,10 +391,10 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
     story.append(Paragraph("NEUMADIESEL", ParagraphStyle("brand", fontName="Helvetica-Bold", fontSize=11, textColor=GOLD, spaceAfter=3)))
     story.append(Paragraph("Informe de Inspección de Caminos", styles["cover_title"]))
     story.append(Spacer(1, 3 * mm))
-    story.append(Paragraph(mission.name, ParagraphStyle(
+    story.append(Paragraph(mission.nombre, ParagraphStyle(
         "coverMission", fontName="Helvetica-Bold", fontSize=13.5, textColor=BLACK, spaceAfter=3, leading=17,
     )))
-    story.append(Paragraph(mission.segment, styles["cover_sub"]))
+    story.append(Paragraph(mission.tramo, styles["cover_sub"]))
     story.append(PageBreak())
 
     # ---- Executive summary ----
@@ -494,16 +494,16 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
 
     card_number = 0
     for image in images:
-        image_detections = [d for d in by_image.get(image.id, []) if d.review_status != "rejected"]
+        image_detections = [d for d in by_image.get(image.id_imagen, []) if d.estado_revision != "rejected"]
         if not image_detections:
             continue
         card_number += 1
 
         annotated = _annotate_image(image, image_detections)
-        photo_cell = Image(annotated, width=82 * mm, height=82 * mm * image.height / image.width) if annotated else Paragraph("Imagen no disponible", styles["muted"])
+        photo_cell = Image(annotated, width=82 * mm, height=82 * mm * image.alto / image.ancho) if annotated else Paragraph("Imagen no disponible", styles["muted"])
         location_text = (
-            f"{image.latitude:.5f}, {image.longitude:.5f}"
-            if image.latitude is not None and image.longitude is not None
+            f"{image.latitud:.5f}, {image.longitud:.5f}"
+            if image.latitud is not None and image.longitud is not None
             else "Sin coordenadas EXIF"
         )
         photo_block = [
@@ -514,19 +514,19 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
 
         finding_rows = []
         for detection in image_detections:
-            status_text, status_color = _status_badge(detection.review_status)
+            status_text, status_color = _status_badge(detection.estado_revision)
             finding_rows.append(
                 Table(
                     [[
                         Paragraph(
-                            f'<font color="{LABEL_COLORS.get(detection.label, FALLBACK_COLOR)}">●</font> '
-                            f"<b>{detection.label}</b> — {detection.confidence:.0%}",
+                            f'<font color="{LABEL_COLORS.get(detection.clase, FALLBACK_COLOR)}">●</font> '
+                            f"<b>{detection.clase}</b> — {detection.confianza:.0%}",
                             styles["card_title"],
                         ),
                     ], [
                         Paragraph(f'<font color="#{status_color.hexval()[2:]}"><b>{status_text}</b></font>', styles["muted"]),
                     ], [
-                        Paragraph(RECOMMENDATIONS.get(detection.label, DEFAULT_RECOMMENDATION), styles["body"]),
+                        Paragraph(RECOMMENDATIONS.get(detection.clase, DEFAULT_RECOMMENDATION), styles["body"]),
                     ]],
                     colWidths=[70 * mm],
                     style=TableStyle([
@@ -553,7 +553,7 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
         ]))
 
         header = Table(
-            [[Paragraph(f"Ficha {card_number} · {image.filename}", ParagraphStyle("cardHeader", fontName="Helvetica-Bold", fontSize=9.5, textColor=colors.white))]],
+            [[Paragraph(f"Ficha {card_number} · {image.nombre_archivo}", ParagraphStyle("cardHeader", fontName="Helvetica-Bold", fontSize=9.5, textColor=colors.white))]],
             colWidths=[160 * mm],
         )
         header.setStyle(TableStyle([
@@ -566,8 +566,8 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
         card_flow = [header, card_table]
         seen_labels = []
         for detection in image_detections:
-            if detection.label not in seen_labels:
-                seen_labels.append(detection.label)
+            if detection.clase not in seen_labels:
+                seen_labels.append(detection.clase)
         for label in seen_labels:
             card_flow.append(Spacer(1, 2.5 * mm))
             card_flow.append(_diagnosis_block(label, styles))
@@ -588,13 +588,13 @@ def build_report(mission: Mission, images: list[MissionImage], detections: list[
             styles["muted"],
         ))
         story.append(Spacer(1, 3 * mm))
-        image_names = {image.id: image.filename for image in images}
+        image_names = {image.id_imagen: image.nombre_archivo for image in images}
         rows = [["Imagen", "Hallazgo", "Confianza"]]
         for d in discarded:
             rows.append([
-                Paragraph(image_names.get(d.image_id, "—"), styles["body"]),
-                Paragraph(d.label, styles["body"]),
-                f"{d.confidence:.0%}",
+                Paragraph(image_names.get(d.id_imagen, "—"), styles["body"]),
+                Paragraph(d.clase, styles["body"]),
+                f"{d.confianza:.0%}",
             ])
         discard_table = Table(rows, colWidths=[80 * mm, 54 * mm, 30 * mm], repeatRows=1)
         discard_table.setStyle(TableStyle([

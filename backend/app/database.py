@@ -1,48 +1,25 @@
-from pathlib import Path
-
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine, select
 
 from app.config import settings
+from app.models import Faena
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+engine = create_engine(settings.database_url, pool_pre_ping=True)
 
 
-def _ensure_detection_columns() -> None:
-    """Lightweight auto-migration for SQLite dev DBs: adds columns introduced
-    after the table already existed on disk. create_all() only creates
-    missing tables, it never alters existing ones, so newly added Detection
-    fields (repair_status, created_at) need to be added by hand here.
-    Production deployments on Postgres should use Alembic instead (see README).
-    """
-    if not settings.database_url.startswith("sqlite"):
-        return
-    with engine.connect() as conn:
-        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(detection)")}
-        if not columns:
-            return  # table doesn't exist yet; create_all() will create it with all columns
-        if "repair_status" not in columns:
-            conn.exec_driver_sql("ALTER TABLE detection ADD COLUMN repair_status VARCHAR(30) DEFAULT 'pending'")
-        if "created_at" not in columns:
-            # SQLite forbids a non-constant default (CURRENT_TIMESTAMP) in ADD COLUMN,
-            # so add it plain and backfill existing rows in a separate UPDATE.
-            conn.exec_driver_sql("ALTER TABLE detection ADD COLUMN created_at TIMESTAMP")
-            conn.exec_driver_sql("UPDATE detection SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
-        # Manual human review was retired — detections are confirmed automatically
-        # by the model now (see Detection.review_status default = "confirmed").
-        # Backfill rows created before this change so they are not stuck blocked
-        # from being marked as repaired.
-        conn.exec_driver_sql("UPDATE detection SET review_status = 'confirmed' WHERE review_status = 'pending'")
-        conn.commit()
-
-
-def create_db_and_tables() -> None:
-    if settings.database_url.startswith("sqlite"):
-        database_path = settings.database_url.removeprefix("sqlite:///")
-        Path(database_path).parent.mkdir(parents=True, exist_ok=True)
-    SQLModel.metadata.create_all(engine)
-    _ensure_detection_columns()
+def ensure_development_faena() -> None:
+    with Session(engine) as session:
+        faena = session.exec(select(Faena).where(Faena.id_faena == settings.development_faena_id)).first()
+        if faena is None:
+            session.add(
+                Faena(
+                    id_faena=settings.development_faena_id,
+                    nombre=settings.development_faena_name,
+                    correo=settings.development_faena_email,
+                    hash_contrasena="authentication-not-implemented",
+                )
+            )
+            session.commit()
 
 
 def get_session():
