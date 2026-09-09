@@ -75,6 +75,9 @@ class Deteccion(SQLModel, table=True):
     estado_revision: str = Field(
         default="pending", sa_column=Column("estado_revision", String(30), nullable=False, index=True)
     )
+    estado_reparacion: str = Field(
+        default="pending", sa_column=Column("estado_reparacion", String(30), nullable=False, index=True)
+    )
 
 
 class Informe(SQLModel, table=True):

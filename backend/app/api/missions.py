@@ -1,4 +1,5 @@
 import shutil
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from sqlmodel import Session, delete, select
 from app.config import settings
 from app.database import get_session
 from app.models import Deteccion, Imagen, Mision
-from app.schemas import DetectionRead, DetectionReview, ImageRead, MissionRead, MissionSummary
+from app.schemas import DetectionRead, DetectionRepairUpdate, DetectionReview, ImageRead, MissionRead, MissionSummary
 from app.services.detector import get_detector
 from app.services.metadata import extract_gps
 from app.services.report import build_report
@@ -22,14 +23,16 @@ router = APIRouter(prefix="/missions", tags=["missions"])
 
 def serialize_detection(detection: Deteccion) -> DetectionRead:
     return DetectionRead(
-        id=detection.id_deteccion,
-        label=detection.clase,
-        confidence=detection.confianza,
-        x=detection.bbox_x,
-        y=detection.bbox_y,
-        width=detection.bbox_ancho,
-        height=detection.bbox_alto,
-        review_status=detection.estado_revision,
+        id=getattr(detection, "id_deteccion", getattr(detection, "id", "")),
+        label=getattr(detection, "clase", getattr(detection, "label", "")),
+        confidence=getattr(detection, "confianza", getattr(detection, "confidence", 0.0)),
+        x=getattr(detection, "bbox_x", getattr(detection, "x", 0.0)),
+        y=getattr(detection, "bbox_y", getattr(detection, "y", 0.0)),
+        width=getattr(detection, "bbox_ancho", getattr(detection, "width", 0.0)),
+        height=getattr(detection, "bbox_alto", getattr(detection, "height", 0.0)),
+        review_status=getattr(detection, "estado_revision", getattr(detection, "review_status", "pending")),
+        repair_status=getattr(detection, "estado_reparacion", getattr(detection, "repair_status", "pending")),
+        created_at=getattr(detection, "created_at", datetime.now(timezone.utc)),
     )
 
 
@@ -249,6 +252,27 @@ def review_detection(
     return serialize_detection(detection)
 
 
+@router.patch("/{mission_id}/detections/{detection_id}/repair", response_model=DetectionRead)
+def update_repair_status(
+    mission_id: str,
+    detection_id: str,
+    payload: DetectionRepairUpdate,
+    session: Session = Depends(get_session),
+) -> DetectionRead:
+    # La confirmacion/revision de un hallazgo la realiza el modelo de IA; el estado de
+    # reparacion es independiente y no depende de estado_revision.
+    require_mission(session, mission_id)
+    detection = session.get(Deteccion, detection_id)
+    image = session.get(Imagen, detection.id_imagen) if detection else None
+    if not detection or not image or image.id_mision != mission_id:
+        raise HTTPException(status_code=404, detail="Detection not found")
+    detection.estado_reparacion = payload.repair_status
+    session.add(detection)
+    session.commit()
+    session.refresh(detection)
+    return serialize_detection(detection)
+
+
 @router.get("/{mission_id}/images/{image_id}")
 def get_image(mission_id: str, image_id: str, session: Session = Depends(get_session)) -> FileResponse:
     require_mission(session, mission_id)
@@ -267,7 +291,11 @@ def get_report(mission_id: str, session: Session = Depends(get_session)) -> Resp
     mission = require_mission(session, mission_id)
     images = list(session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all())
     image_ids = [image.id_imagen for image in images]
-    detections = list(session.exec(select(Deteccion).where(Deteccion.id_imagen.in_(image_ids))).all()) if image_ids else []
+    detections = (
+        list(session.exec(select(Deteccion).where(Deteccion.id_imagen.in_(image_ids))).all())
+        if image_ids
+        else []
+    )
     report = build_report(mission, images, detections)
     return Response(
         content=report,

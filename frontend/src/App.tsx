@@ -706,8 +706,7 @@ export default function App() {
                       <div className="detail-actions">
                         <button
                           className={selectedFinding.repair_status === "repaired" ? "button secondary full" : "button positive full"}
-                          disabled={repairBusyId === selectedFinding.id || (selectedFinding.repair_status !== "repaired" && selectedFinding.review_status !== "confirmed")}
-                          title={selectedFinding.repair_status !== "repaired" && selectedFinding.review_status !== "confirmed" ? "Solo se pueden marcar como reparados los hallazgos confirmados" : undefined}
+                          disabled={repairBusyId === selectedFinding.id}
                           onClick={() => toggleRepairStatus(selectedFinding)}
                         >
                           {repairBusyId === selectedFinding.id ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
