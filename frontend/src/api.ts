@@ -36,7 +36,12 @@ export const api = {
     }),
 
   detect: (missionId: string) => request<Mission>(`/missions/${missionId}/detect`, { method: "POST" }),
-
+  editMission: (missionId: string, name: string, segment: string) =>
+    request<Mission>(`/missions/${missionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, segment })
+    }),
   reviewDetection: (missionId: string, detectionId: string, reviewStatus: ReviewStatus) =>
     request<Detection>(`/missions/${missionId}/detections/${detectionId}`, {
       method: "PATCH",
