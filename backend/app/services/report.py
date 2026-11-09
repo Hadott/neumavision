@@ -35,33 +35,34 @@ MUTED = colors.HexColor("#6c7881")
 ON_BRAND = colors.HexColor("#171412")
 DANGER = colors.HexColor("#c0392b")
 WARN = colors.HexColor("#a16207")
+OPTIMO = colors.HexColor("#167d72")
+
+CRITICALITY_COLORS = {"critico": DANGER, "moderado": WARN, "optimo": OPTIMO}
+CRITICALITY_LABELS = {"critico": "CRÍTICO", "moderado": "MODERADO", "optimo": "ÓPTIMO"}
+
+GOOD_CONDITION_LABEL = "Carpeta Buen Estado"
 
 LABEL_COLORS = {
-    "Bache": "#ff6847",
-    "Piedra": "#f2b23e",
-    "Desprendimiento de roca": "#9e82ff",
+    "Rocas": "#f2b23e",
+    GOOD_CONDITION_LABEL: "#2bb8a8",
+    "Material Pedregoso": "#9e82ff",
 }
 FALLBACK_COLOR = "#4ca8ff"
 
 RECOMMENDATIONS = {
-    "Bache": "Priorizar perfilado y relleno del sector antes del próximo tránsito de camiones CAEX. Regar en forma controlada previo a intervenir para facilitar la compactación.",
-    "Piedra": "Retirar la roca de la pista o berma antes de que un CAEX transite por el sector, evitando dañar el pretil de seguridad durante el retiro.",
-    "Desprendimiento de roca": "Inspeccionar el pretil lateral del tramo y retirar el material desprendido. Evaluar si el pretil requiere refuerzo adicional.",
+    "Rocas": "Retirar la roca de la pista o berma antes de que un CAEX transite por el sector, evitando dañar el pretil de seguridad durante el retiro.",
+    "Material Pedregoso": "Retirar el material pedregoso acumulado en la pista y evaluar si el pretil lateral requiere refuerzo adicional para evitar nuevos derrames.",
+    GOOD_CONDITION_LABEL: "Sin acción requerida: el tramo fotografiado se encuentra en buen estado. Mantener en el monitoreo periódico habitual.",
 }
 DEFAULT_RECOMMENDATION = "Evaluar el hallazgo en terreno y aplicar la medida correctiva que corresponda antes del próximo tránsito de camiones."
 
 # Maquinaria de apoyo sugerida por tipo de hallazgo (icon key -> nombre a mostrar)
 MACHINERY = {
-    "Bache": [
-        ("motoniveladora", "Motoniveladora"),
-        ("camion_aljibe", "Camión aljibe"),
-        ("rodillo", "Rodillo compactador"),
-    ],
-    "Piedra": [
+    "Rocas": [
         ("cargador_frontal", "Cargador frontal"),
         ("camion_tolva", "Camión tolva"),
     ],
-    "Desprendimiento de roca": [
+    "Material Pedregoso": [
         ("bulldozer", "Bulldozer"),
         ("cargador_frontal", "Cargador frontal"),
         ("camion_tolva", "Camión tolva"),
@@ -71,26 +72,19 @@ DEFAULT_MACHINERY = [("motoniveladora", "Motoniveladora"), ("cargador_frontal", 
 
 # Causa probable y consecuencia de no corregir el hallazgo, por tipo
 CAUSES = {
-    "Bache": {
-        "causa": "Concentración de tránsito de camiones CAEX sobre un mismo punto, drenaje deficiente y falta de "
-        "perfilado periódico, que va debilitando la carpeta de rodado hasta formar la depresión.",
-        "consecuencia": "Impacto repetido de la rueda contra el borde del bache: cortes en la banda de rodado, "
-        "desprendimiento de tacos y daño a la carcasa del neumático OTR. Si no se corrige, el bache se profundiza "
-        "y aumenta el riesgo de daño a la suspensión y los ejes del camión.",
-    },
-    "Piedra": {
+    "Rocas": {
         "causa": "Material suelto o de sobretamaño que cae de la tolva de un CAEX, se desprende de un pretil "
         "lateral, o queda en la pista tras una tronadura o el paso de equipos de carguío.",
         "consecuencia": "Corte o perforación de la banda de rodado al pasar por encima, especialmente en la pared "
         "lateral del neumático. Puede derivar en pérdida de presión inmediata, exposición de cables de la carcasa "
         "y, en el peor caso, en la pérdida total del neumático OTR.",
     },
-    "Desprendimiento de roca": {
+    "Material Pedregoso": {
         "causa": "Inestabilidad del talud o pretil lateral del camino, erosión por riego mal controlado, o "
-        "vibración por tránsito de equipos pesados que suelta bloques de roca hacia la plataforma de tránsito.",
-        "consecuencia": "El material acumulado en la pista puede dañar los neumáticos igual que una piedra suelta, "
-        "y su presencia indica un riesgo mayor de inestabilidad del talud que podría derivar en un desprendimiento "
-        "de mayor magnitud sobre la vía o los equipos que transitan.",
+        "vibración por tránsito de equipos pesados que suelta material pedregoso hacia la plataforma de tránsito.",
+        "consecuencia": "El material pedregoso acumulado en la pista puede dañar los neumáticos igual que una "
+        "roca suelta, y su presencia indica un riesgo mayor de inestabilidad del talud que podría derivar en un "
+        "derrame de mayor magnitud sobre la vía o los equipos que transitan.",
     },
 }
 DEFAULT_CAUSE = {
@@ -400,9 +394,9 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
     # ---- Executive summary ----
     story.append(Paragraph("Resumen ejecutivo", styles["h1"]))
     story.append(Paragraph(
-        "Este informe reemplaza el levantamiento manual de anomalías del camino: identifica rocas, baches y "
-        "desniveles que puedan dañar los neumáticos OTR de los camiones CAEX a partir de imágenes RGB, y localiza "
-        "cada hallazgo para su corrección en terreno.",
+        "Este informe reemplaza el levantamiento manual de anomalías del camino: identifica rocas y acumulaciones "
+        "de material pedregoso que puedan dañar los neumáticos OTR de los camiones CAEX, y verifica el estado de "
+        "la carpeta de rodado, a partir de imágenes RGB georreferenciadas.",
         styles["body"],
     ))
     story.append(Spacer(1, 5 * mm))
@@ -479,6 +473,43 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
     story.append(type_table)
     story.append(Spacer(1, 8 * mm))
 
+    criticality_counts = Counter(
+        image.criticidad_manual for image in images if image.criticidad_manual in CRITICALITY_COLORS
+    )
+    if criticality_counts:
+        story.append(Paragraph("Clasificación manual de imágenes (semáforo de criticidad)", styles["h2"]))
+        story.append(Paragraph(
+            "Criticidad asignada por el revisor a cada imagen durante la etapa de revisión, independiente de la "
+            "confianza del modelo.",
+            styles["muted"],
+        ))
+        story.append(Spacer(1, 2 * mm))
+        crit_cells, crit_captions = [], []
+        for level in ("critico", "moderado", "optimo"):
+            amount = criticality_counts.get(level, 0)
+            color_hex = f"#{CRITICALITY_COLORS[level].hexval()[2:]}"
+            crit_cells.append(Paragraph(
+                f'<font color="{color_hex}" size="16">●</font> <font size="13"><b>{amount}</b></font>',
+                styles["body"],
+            ))
+            crit_captions.append(Paragraph(CRITICALITY_LABELS[level], styles["muted"]))
+        unclassified = len(images) - sum(criticality_counts.values())
+        if unclassified > 0:
+            crit_cells.append(Paragraph(f'<font size="13"><b>{unclassified}</b></font>', styles["body"]))
+            crit_captions.append(Paragraph("SIN CLASIFICAR", styles["muted"]))
+        criticality_table = Table([crit_cells, crit_captions], colWidths=[38 * mm] * len(crit_cells))
+        criticality_table.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.6, LINE),
+            ("INNERGRID", (0, 0), (-1, -1), 0.4, LINE),
+            ("BACKGROUND", (0, 0), (-1, -1), LIGHT),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(criticality_table)
+        story.append(Spacer(1, 8 * mm))
+
     story.append(CondPageBreak(35 * mm))
     story.append(Spacer(1, 6 * mm))
 
@@ -495,7 +526,7 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
     card_number = 0
     for image in images:
         image_detections = [d for d in by_image.get(image.id_imagen, []) if d.estado_revision != "rejected"]
-        if not image_detections:
+        if not image_detections and image.criticidad_manual not in CRITICALITY_COLORS:
             continue
         card_number += 1
 
@@ -511,8 +542,23 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
             Spacer(1, 2 * mm),
             Paragraph(f"<b>Ubicación:</b> {location_text}", styles["muted"]),
         ]
+        if image.criticidad_manual in CRITICALITY_COLORS:
+            crit_color = CRITICALITY_COLORS[image.criticidad_manual]
+            photo_block.append(Spacer(1, 1.5 * mm))
+            photo_block.append(Paragraph(
+                f'<font color="#{crit_color.hexval()[2:]}">●</font> <b>Criticidad asignada: '
+                f"{CRITICALITY_LABELS[image.criticidad_manual]}</b>",
+                styles["muted"],
+            ))
 
         finding_rows = []
+        if not image_detections:
+            finding_rows.append(
+                Table(
+                    [[Paragraph("Sin hallazgos activos en esta imagen.", styles["muted"])]],
+                    colWidths=[70 * mm],
+                )
+            )
         for detection in image_detections:
             status_text, status_color = _status_badge(detection.estado_revision)
             finding_rows.append(
@@ -569,6 +615,8 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
             if detection.clase not in seen_labels:
                 seen_labels.append(detection.clase)
         for label in seen_labels:
+            if label == GOOD_CONDITION_LABEL:
+                continue
             card_flow.append(Spacer(1, 2.5 * mm))
             card_flow.append(_diagnosis_block(label, styles))
         card_flow.append(Spacer(1, 6 * mm))

@@ -16,6 +16,7 @@ class Faena(SQLModel, table=True):
     nombre: str = Field(sa_column=Column("nombre", String(120), nullable=False, index=True))
     correo: str = Field(sa_column=Column("correo", String(255), nullable=False, unique=True, index=True))
     hash_contrasena: str = Field(sa_column=Column("hash_contrasena", String(255), nullable=False))
+    rol: str = Field(default="faena", sa_column=Column("rol", String(20), nullable=False, default="faena", server_default="faena"))
     fecha_creacion: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column("fecha_creacion", DateTime, nullable=False),
@@ -57,6 +58,12 @@ class Imagen(SQLModel, table=True):
     estado_proceso: str = Field(
         default="pending", sa_column=Column("estado_proceso", String(30), nullable=False, index=True)
     )
+    # Clasificacion de criticidad asignada manualmente por el revisor durante la revision
+    # (critico / moderado / optimo). Es independiente de la criticidad automatica por
+    # confianza que se usa en el Dashboard.
+    criticidad_manual: str | None = Field(
+        default=None, sa_column=Column("criticidad_manual", String(20), nullable=True)
+    )
 
 
 class Deteccion(SQLModel, table=True):
@@ -77,6 +84,9 @@ class Deteccion(SQLModel, table=True):
     )
     estado_reparacion: str = Field(
         default="pending", sa_column=Column("estado_reparacion", String(30), nullable=False, index=True)
+    )
+    fecha_reparacion: datetime | None = Field(
+        default=None, sa_column=Column("fecha_reparacion", DateTime, nullable=True)
     )
 
 

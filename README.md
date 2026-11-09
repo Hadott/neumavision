@@ -41,13 +41,13 @@ uvicorn app.main:app --reload
 
 ### Frontend
 
-En otra terminal:
-
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+
+`npm run dev` también inicia el backend automáticamente (usa `backend/venv` o `backend/.venv`) si no está corriendo. Abre http://localhost:5173: el frontend llama a `/api/v1` y Vite lo redirige al backend, así que no hay que configurar otro puerto.
 
 ## Conectar YOLO
 

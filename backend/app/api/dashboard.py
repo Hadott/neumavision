@@ -1,37 +1,48 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import Deteccion, Imagen, Mision
+from app.models import Deteccion, Faena, Imagen, Mision
 from app.schemas import DashboardFinding
+from app.services.auth import CurrentFaena, is_admin
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/findings", response_model=list[DashboardFinding])
-def list_findings(session: Session = Depends(get_session)) -> list[DashboardFinding]:
+def list_findings(
+    cuenta: CurrentFaena,
+    faena_id: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+) -> list[DashboardFinding]:
     """Lista plana de hallazgos activos de todas las misiones.
 
     Mantiene compatibilidad con la estructura actual del esquema de datos
     (nombres en español), sin depender de columnas que no existen en la
     base de datos actual.
     """
-    rows = session.exec(
+    query = (
         select(Deteccion, Imagen, Mision)
         .where(Deteccion.id_imagen == Imagen.id_imagen)
         .where(Imagen.id_mision == Mision.id_mision)
         .where(Deteccion.estado_revision != "rejected")
-    ).all()
+    )
+    # Cada faena ve solo sus hallazgos; el administrador ve todos o filtra por faena.
+    if not is_admin(cuenta):
+        query = query.where(Mision.id_faena == cuenta.id_faena)
+    elif faena_id:
+        query = query.where(Mision.id_faena == faena_id)
+    rows = session.exec(query).all()
+    faena_names = {item.id_faena: item.nombre for item in session.exec(select(Faena)).all()}
 
     findings: list[DashboardFinding] = []
     for detection, image, mission in rows:
-        review_status = getattr(detection, "estado_revision", getattr(detection, "review_status", "pending"))
-        repair_status = getattr(detection, "repair_status", "pending")
-        created_at = getattr(detection, "created_at", None)
-        if created_at is None:
-            from datetime import datetime, timezone
-            created_at = datetime.now(timezone.utc)
+        # Registros antiguos pueden tener estos campos en NULL: se tratan como "pending".
+        review_status = getattr(detection, "estado_revision", None) or "pending"
+        repair_status = getattr(detection, "estado_reparacion", None) or "pending"
+        # Fecha del hallazgo: captura de la imagen (EXIF) o, si no existe, creacion de la mision.
+        created_at = image.fecha_captura or mission.fecha_creacion
 
         findings.append(
             DashboardFinding(
@@ -53,6 +64,9 @@ def list_findings(session: Session = Depends(get_session)) -> list[DashboardFind
                 mission_id=getattr(mission, "id_mision", getattr(mission, "id", "")),
                 mission_name=getattr(mission, "nombre", getattr(mission, "name", "")),
                 mission_segment=getattr(mission, "tramo", getattr(mission, "segment", "")),
+                repaired_at=getattr(detection, "fecha_reparacion", None),
+                faena_id=mission.id_faena,
+                faena_name=faena_names.get(mission.id_faena, ""),
             )
         )
     return findings

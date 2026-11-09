@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 ReviewStatus = Literal["pending", "confirmed", "rejected"]
 RepairStatus = Literal["pending", "repaired"]
+ManualCriticality = Literal["critico", "moderado", "optimo"]
 
 
 class DetectionRead(BaseModel):
@@ -30,6 +31,7 @@ class ImageRead(BaseModel):
     longitude: float | None
     image_url: str
     detections: list[DetectionRead]
+    criticidad_manual: ManualCriticality | None = None
 
 
 class MissionRead(BaseModel):
@@ -51,6 +53,11 @@ class MissionSummary(BaseModel):
     detection_count: int
     pending_count: int
     confirmed_count: int
+    criticidad_critico_count: int = 0
+    criticidad_moderado_count: int = 0
+    criticidad_optimo_count: int = 0
+    faena_id: str = ""
+    faena_name: str = ""
 
 
 class DetectionReview(BaseModel):
@@ -59,6 +66,10 @@ class DetectionReview(BaseModel):
 
 class DetectionRepairUpdate(BaseModel):
     repair_status: RepairStatus
+
+
+class ImageCriticalityUpdate(BaseModel):
+    criticidad_manual: ManualCriticality | None = None
 
 
 class DashboardFinding(BaseModel):
@@ -80,6 +91,9 @@ class DashboardFinding(BaseModel):
     mission_id: str
     mission_name: str
     mission_segment: str
+    repaired_at: datetime | None = None
+    faena_id: str = ""
+    faena_name: str = ""
 
 
 class HealthRead(BaseModel):

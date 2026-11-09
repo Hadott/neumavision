@@ -16,7 +16,12 @@ export const criticalityLabel: Record<Criticality, string> = {
   optimo: "Óptimo"
 };
 
-export function criticalityOf(confidence: number): Criticality {
+// Las detecciones de "Carpeta Buen Estado" no son una anomalía: siempre se clasifican como "óptimo",
+// sin importar la confianza del modelo.
+export const GOOD_CONDITION_LABEL = "Carpeta Buen Estado";
+
+export function criticalityOf(confidence: number, label?: string): Criticality {
+  if (label === GOOD_CONDITION_LABEL) return "optimo";
   if (confidence >= 0.8) return "critico";
   if (confidence >= 0.6) return "moderado";
   return "optimo";
@@ -61,7 +66,7 @@ export default function DashboardMap({ findings, selectedId, onSelect }: Dashboa
         </LayersControl.BaseLayer>
       </LayersControl>
       {located.map((item) => {
-        const criticality = criticalityOf(item.confidence);
+        const criticality = criticalityOf(item.confidence, item.label);
         const color = criticalityColor[criticality];
         const isSelected = selectedId === item.id;
         const isRepaired = item.repair_status === "repaired";

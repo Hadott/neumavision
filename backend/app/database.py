@@ -68,7 +68,8 @@ def ensure_development_faena() -> None:
                     id_faena=settings.development_faena_id,
                     nombre=settings.development_faena_name,
                     correo=settings.development_faena_email,
-                    hash_contrasena="authentication-not-implemented",
+                    hash_contrasena="sin-contrasena",
+                    rol="admin",
                 )
             )
             session.commit()

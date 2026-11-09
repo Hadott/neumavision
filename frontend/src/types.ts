@@ -1,5 +1,6 @@
 export type ReviewStatus = "pending" | "confirmed" | "rejected";
 export type RepairStatus = "pending" | "repaired";
+export type ManualCriticality = "critico" | "moderado" | "optimo";
 
 export type Detection = {
   id: string;
@@ -23,6 +24,7 @@ export type MissionImage = {
   longitude: number | null;
   image_url: string;
   detections: Detection[];
+  criticidad_manual: ManualCriticality | null;
 };
 
 export type Mission = {
@@ -44,6 +46,11 @@ export type MissionSummary = {
   detection_count: number;
   pending_count: number;
   confirmed_count: number;
+  criticidad_critico_count: number;
+  criticidad_moderado_count: number;
+  criticidad_optimo_count: number;
+  faena_id: string;
+  faena_name: string;
 };
 
 export type DashboardFinding = {
@@ -65,10 +72,25 @@ export type DashboardFinding = {
   mission_id: string;
   mission_name: string;
   mission_segment: string;
+  repaired_at: string | null;
+  faena_id: string;
+  faena_name: string;
 };
 
 export type Health = {
   status: string;
   detector: string;
   database: string;
+};
+
+export type Account = {
+  id: string;
+  nombre: string;
+  correo: string;
+  rol: "admin" | "faena";
+};
+
+export type Session = {
+  token: string;
+  cuenta: Account;
 };

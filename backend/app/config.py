@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     yolo_model_path: Path = Path("./models/best.pt")
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     development_faena_id: str = "00000000-0000-0000-0000-000000000001"
-    development_faena_name: str = "Faena de desarrollo"
-    development_faena_email: str = "admin@admin.com"
+    development_faena_name: str = "NeumaDiesel"
+    development_faena_email: str = "neumavision@neumadiesel.com"
+    # Clave para firmar los tokens de sesion. En produccion debe definirse en .env.
+    secret_key: str = "cambiar-esta-clave-en-produccion"
+    token_hours: int = 12
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

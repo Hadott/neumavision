@@ -23,7 +23,7 @@ class Detector(Protocol):
 class MockDetector:
     """Deterministic demo detector. Replace this adapter without changing the API."""
 
-    labels = ("Bache", "Piedra", "Desprendimiento de roca")
+    labels = ("Rocas", "Carpeta Buen Estado", "Material Pedregoso")
 
     def predict(self, image_path: Path) -> list[DetectionResult]:
         random = Random(image_path.name)
