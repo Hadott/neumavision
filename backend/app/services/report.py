@@ -20,6 +20,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.config import settings
 from app.models import Deteccion, Imagen, Mision
 
 
@@ -389,6 +390,24 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
         "coverMission", fontName="Helvetica-Bold", fontSize=13.5, textColor=BLACK, spaceAfter=3, leading=17,
     )))
     story.append(Paragraph(mission.tramo, styles["cover_sub"]))
+    if settings.detector_mode.lower() != "yolo":
+        warning = Table(
+            [[Paragraph(
+                "<b>ADVERTENCIA:</b> Análisis simulado. Los resultados son ficticios y no corresponden a detecciones reales.",
+                styles["body"],
+            )]],
+            colWidths=[160 * mm],
+        )
+        warning.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.8, DANGER),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff1ef")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        story.append(Spacer(1, 5 * mm))
+        story.append(warning)
     story.append(PageBreak())
 
     # ---- Executive summary ----

@@ -66,6 +66,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const payload = await response.json().catch(() => ({ detail: fallback }));
     throw new Error(typeof payload.detail === "string" ? payload.detail : `Error ${response.status}`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -82,6 +83,25 @@ export const api = {
   me: () => request<Account>("/auth/me"),
 
   faenas: () => request<Account[]>("/auth/faenas"),
+  adminFaenas: () => request<Account[]>("/auth/admin/faenas"),
+  createFaena: (nombre: string, correo: string, contrasena: string) =>
+    request<Account>("/auth/admin/faenas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre, correo, contrasena })
+    }),
+  updateFaena: (id: string, nombre: string, correo: string) =>
+    request<Account>(`/auth/admin/faenas/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre, correo })
+    }),
+  resetFaenaPassword: (id: string, contrasena: string) =>
+    request<void>(`/auth/faenas/${id}/password`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contrasena })
+    }),
 
   listMissions: (faenaId?: string) => request<MissionSummary[]>(withFaena("/missions", faenaId)),
 
@@ -95,8 +115,6 @@ export const api = {
     files.forEach((file) => body.append("files", file));
     return request<Mission>("/missions", { method: "POST", body });
   },
-
-  createDemo: () => request<Mission>("/missions/demo", { method: "POST" }),
 
   deleteMission: (missionId: string) =>
     fetch(`${API_URL}/missions/${missionId}`, { method: "DELETE", headers: authHeaders() }).then((response) => {

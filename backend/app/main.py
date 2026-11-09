@@ -36,8 +36,7 @@ app.add_middleware(
 
 @app.get(f"{settings.api_prefix}/health", response_model=HealthRead, tags=["system"])
 def health() -> HealthRead:
-    database_kind = "sqlite" if "sqlite" in settings.database_url else "postgresql"
-    return HealthRead(status="ok", detector=settings.detector_mode, database=database_kind)
+    return HealthRead(status="ok", detector=settings.detector_mode, database="postgresql")
 
 
 app.include_router(auth_router, prefix=settings.api_prefix)

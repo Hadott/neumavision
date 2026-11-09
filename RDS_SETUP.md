@@ -145,7 +145,6 @@ Cuando despliegues a producción:
 ## 📝 Cambios en el Proyecto
 
 ✅ **Actualizado**:
-- `backend/.env.example` - DATABASE_URL apunta a RDS
 - `backend/app/config.py` - Default es PostgreSQL
 
 ✅ **Sin cambios** (ya son compatibles):

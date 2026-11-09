@@ -88,6 +88,7 @@ export type Account = {
   nombre: string;
   correo: string;
   rol: "admin" | "faena";
+  misiones?: number;
 };
 
 export type Session = {

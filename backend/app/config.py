@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     development_faena_id: str = "00000000-0000-0000-0000-000000000001"
     development_faena_name: str = "NeumaDiesel"
     development_faena_email: str = "neumavision@neumadiesel.com"
-    # Clave para firmar los tokens de sesion. En produccion debe definirse en .env.
-    secret_key: str = "cambiar-esta-clave-en-produccion"
+    # Clave privada para firmar tokens; debe configurarse en el .env local.
+    secret_key: str = Field(min_length=32)
     token_hours: int = 12
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")

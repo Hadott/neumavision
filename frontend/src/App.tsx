@@ -6,18 +6,14 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   CircleDot,
   Clock,
-  CloudOff,
-  Database,
   Download,
   FileImage,
   FileText,
   Gauge,
   History,
   ImagePlus,
-  Layers3,
   LayoutDashboard,
   LoaderCircle,
   LogOut,
@@ -26,12 +22,11 @@ import {
   Play,
   RotateCcw,
   ScanLine,
-  Server,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Trash2,
   Upload,
+  UsersRound,
   Wrench,
   X,
   XCircle
@@ -39,6 +34,7 @@ import {
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, getSession, setSession, setUnauthorizedHandler } from "./api";
+import AdminAccounts from "./AdminAccounts";
 import logoIcon from "./assets/logo-icon-dark.png";
 import DashboardStats from "./DashboardStats";
 import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
@@ -48,9 +44,9 @@ import type { Account, DashboardFinding, Detection, Health, ManualCriticality, M
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
-type Screen = "history" | "workspace" | "dashboard";
+type Screen = "history" | "workspace" | "dashboard" | "accounts";
 type View = "upload" | "review" | "report";
-type Busy = "upload" | "demo" | "detect" | "report" | "open" | null;
+type Busy = "upload" | "detect" | "report" | "open" | null;
 type DashReview = "pending" | "confirmed";
 
 const colorForLabel: Record<string, string> = {
@@ -78,8 +74,8 @@ export default function App() {
   const [mission, setMission] = useState<Mission | null>(null);
   const [selectedImageId, setSelectedImageId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [missionName, setMissionName] = useState("Inspección camino de acceso");
-  const [segment, setSegment] = useState("Tramo A");
+  const [missionName, setMissionName] = useState("");
+  const [segment, setSegment] = useState("");
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState("");
@@ -294,6 +290,12 @@ export default function App() {
     setError("");
   }
 
+  function viewAccountMissions(account: Account) {
+    setFaenaFiltro(account.id);
+    setScreen("history");
+    setError("");
+  }
+
   function startNewMission() {
     resetWorkspace();
     setScreen("workspace");
@@ -342,21 +344,6 @@ export default function App() {
       void refreshMissions();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No fue posible cargar la misión.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function createDemo() {
-    setBusy("demo");
-    setError("");
-    try {
-      const created = await api.createDemo();
-      setMission(created);
-      setSelectedImageId(created.images[0]?.id ?? "");
-      void refreshMissions();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No fue posible crear la demostración.");
     } finally {
       setBusy(null);
     }
@@ -483,12 +470,9 @@ export default function App() {
               {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
             </select>
           )}
-          <span className={`connection ${health ? "online" : "offline"}`}>
-            {health ? <Server size={14} /> : <CloudOff size={14} />}
-            {health ? `API · ${health.detector}` : "API sin conexión"}
-          </span>
           {screen !== "history" && <button className="button ghost" onClick={goToHistory}><History size={15} /> Historial</button>}
           {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}><LayoutDashboard size={15} /> Dashboard</button>}
+          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => setScreen("accounts")}><UsersRound size={15} /> Cuentas</button>}
           {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
           {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
           <span className="account-chip" title={session.cuenta.correo}>
@@ -500,6 +484,19 @@ export default function App() {
       </header>
 
       <AnimatePresence mode="wait">
+      {screen === "accounts" && isAdmin && (
+        <motion.div key="accounts" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
+          <section className="hero">
+            <div>
+              <span className="overline">Administración de plataforma</span>
+              <h1>Usuarios y faenas</h1>
+              <p>Administra los datos de acceso y revisa las misiones de cada cuenta.</p>
+            </div>
+            <div className="architecture"><span><ShieldCheck size={14} /> Solo administradores</span></div>
+          </section>
+          <AdminAccounts onViewMissions={viewAccountMissions} />
+        </motion.div>
+      )}
       {screen === "history" && (
         <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
@@ -507,13 +504,6 @@ export default function App() {
               <span className="overline">Plataforma de inspección RGB</span>
               <h1>Historial de misiones</h1>
               <p>Revisa las misiones ya procesadas o inicia una nueva inspección del camino minero.</p>
-            </div>
-            <div className="architecture">
-              <span><Server size={14} /> FastAPI</span>
-              <ChevronRight size={13} />
-              <span><Layers3 size={14} /> React</span>
-              <ChevronRight size={13} />
-              <span><Database size={14} /> {health?.database ?? "PostgreSQL"}</span>
             </div>
           </section>
 
@@ -584,7 +574,7 @@ export default function App() {
               <div className="card history-empty">
                 <Mountain size={22} />
                 <strong>Todavía no hay misiones</strong>
-                <span>Crea una misión nueva o usa datos demo para ver la plataforma en acción.</span>
+                <span>Crea una misión nueva cargando imágenes de inspección.</span>
                 <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
               </div>
             )}
@@ -599,13 +589,6 @@ export default function App() {
               <span className="overline">Plataforma de inspección RGB</span>
               <h1>Dashboard operacional</h1>
               <p>Monitorea la criticidad de los hallazgos en los caminos mineros, revisa su ubicación en el mapa y compara su evolución entre inspecciones.</p>
-            </div>
-            <div className="architecture">
-              <span><Server size={14} /> FastAPI</span>
-              <ChevronRight size={13} />
-              <span><Layers3 size={14} /> React</span>
-              <ChevronRight size={13} />
-              <span><Database size={14} /> {health?.database ?? "SQLite"}</span>
             </div>
           </section>
 
@@ -844,15 +827,8 @@ export default function App() {
           <section className="hero">
             <div>
               <span className="overline">Plataforma de inspección RGB</span>
-              <h1>Detecta. Revisa. Informa.</h1>
+              <h1>Inspección del camino</h1>
               <p>Detecta condiciones que pueden dañar los neumáticos de camiones CAEX y localiza los sectores que requieren mantenimiento.</p>
-            </div>
-            <div className="architecture">
-              <span><Server size={14} /> FastAPI</span>
-              <ChevronRight size={13} />
-              <span><Layers3 size={14} /> React</span>
-              <ChevronRight size={13} />
-              <span><Database size={14} /> {health?.database ?? "PostgreSQL"}</span>
             </div>
           </section>
 
@@ -869,6 +845,7 @@ export default function App() {
           </nav>
 
           {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
+          {health?.detector !== "yolo" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
 
           {view === "upload" && (
             <section className={`workspace upload-layout fade-in-view ${mission ? "has-mission" : ""}`}>
@@ -879,8 +856,8 @@ export default function App() {
                 </div>
                 {!mission ? <>
                   <div className="field-grid">
-                    <label><span>Nombre de misión</span><input value={missionName} onChange={(event) => setMissionName(event.target.value)} /></label>
-                    <label><span>Tramo</span><input value={segment} onChange={(event) => setSegment(event.target.value)} /></label>
+                    <label><span>Nombre de misión</span><input required minLength={2} maxLength={120} placeholder="Ej.: Inspección camino de acceso" value={missionName} onChange={(event) => setMissionName(event.target.value)} /></label>
+                    <label><span>Tramo</span><input required maxLength={120} placeholder="Ej.: Tramo A" value={segment} onChange={(event) => setSegment(event.target.value)} /></label>
                     {isAdmin && (
                       <label>
                         <span>Faena</span>
@@ -911,7 +888,6 @@ export default function App() {
                   </div>}
                   <div className="form-actions">
                     <button className="button primary" disabled={busy !== null}><Upload size={16} />{busy === "upload" ? "Subiendo…" : "Crear misión"}</button>
-                    <button className="button demo" type="button" onClick={createDemo} disabled={busy !== null}>{busy === "demo" ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Usar datos demo</button>
                   </div>
                 </> : <div className="uploaded-state">
                   <span className="success-icon"><CheckCircle2 size={27} /></span>
@@ -924,11 +900,12 @@ export default function App() {
                 <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div><Gauge size={20} /></div>
                 <div className="pipeline">
                   <div className={mission ? "complete" : "current"}><span>{mission ? <Check size={14} /> : "1"}</span><div><strong>Validar lote</strong><small>{mission ? `${mission.images.length} imágenes compatibles` : "Esperando imágenes"}</small></div></div>
-                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>Ejecutar detector</strong><small>{health?.detector === "yolo" ? "Modelo YOLO conectado" : "Adaptador simulado"}</small></div></div>
+                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>{health?.detector === "yolo" ? "Ejecutar detector" : "Análisis simulado"}</strong><small>{health?.detector === "yolo" ? "Modelo de detección disponible" : "Resultados ficticios; no son detecciones reales"}</small></div></div>
                   <div className={mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "3"}</span><div><strong>Preparar revisión</strong><small>Resultados normalizados por imagen</small></div></div>
                 </div>
-                <div className="process-note"><ShieldCheck size={16} /><span>El backend guarda cada misión y expone los resultados mediante una API documentada.</span></div>
-                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> Ejecutar detección</>}</button>
+                <div className="process-note"><ShieldCheck size={16} /><span>Las misiones quedan disponibles para revisión y seguimiento.</span></div>
+                {health?.detector !== "yolo" && <div className="admin-account-message error"><AlertTriangle size={14} /> El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
+                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> {health?.detector === "yolo" ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
               </aside>
             </section>
           )}
@@ -958,7 +935,6 @@ export default function App() {
                   <div className="image-stage">
                     <img src={api.imageUrl(selectedImage.image_url)} alt="Camino minero bajo revisión" />
                     {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</div>)}
-                    <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
                   </div>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
                 </div>
@@ -1014,7 +990,7 @@ export default function App() {
           {view === "report" && mission && (
             <section className="workspace report-layout fade-in-view">
               <article className="card report-preview">
-                <div className="report-header"><img className="report-header-logo" src={logoIcon} alt="NeumaDiesel" /><span className="overline">Informe de inspección</span><h2>{mission.name}</h2><p>{mission.segment} · {new Date(mission.created_at).toLocaleDateString("es-CL")}</p>{health?.detector === "mock" && <span className="demo-label"><AlertTriangle size={13} /> Resultados simulados</span>}</div>
+                <div className="report-header"><img className="report-header-logo" src={logoIcon} alt="NeumaDiesel" /><span className="overline">Informe de inspección</span><h2>{mission.name}</h2><p>{mission.segment} · {new Date(mission.created_at).toLocaleDateString("es-CL")}</p></div>
                 <div className="report-content">
                   <div className="metric-grid"><div><span>Imágenes</span><strong>{mission.images.length}</strong></div><div><span>Hallazgos</span><strong>{allDetections.length}</strong></div><div><span>Confirmados</span><strong>{confirmed}</strong></div><div><span>Confianza media</span><strong>{confidence(average)}</strong></div></div>
                   <h3>Distribución de anomalías</h3>
@@ -1023,14 +999,14 @@ export default function App() {
                     <div className="map-heading"><div><MapPin size={16} /><span><strong>Mapa de hallazgos</strong><small>Sectores del camino que requieren revisión o mantenimiento.</small></span></div><span className="pill">{mission.images.filter((image) => image.latitude !== null).length} ubicaciones</span></div>
                     <MapPanel mission={mission} selectedImageId={selectedImageId} onSelectImage={(image) => setSelectedImageId(image.id)} />
                   </div>
-                  <div className="report-info"><MapPin size={17} /><span><strong>Ubicación aproximada por imagen</strong><small>FastAPI extrae automáticamente las coordenadas GPS de los metadatos EXIF cuando están disponibles.</small></span></div>
+                  <div className="report-info"><MapPin size={17} /><span><strong>Ubicación aproximada por imagen</strong><small>Las coordenadas GPS se obtienen de los metadatos EXIF cuando están disponibles.</small></span></div>
                 </div>
               </article>
               <aside className="card export-card">
                 <span className="export-icon"><FileText size={27} /></span>
                 <span className="overline">Exportación</span>
                 <h2>Informe listo</h2>
-                <p>El PDF se genera en FastAPI con los datos actuales de la misión y el estado de revisión.</p>
+                <p>El PDF reúne los datos actuales de la misión y el estado de revisión.</p>
                 <div className="export-list"><span><Check size={14} /> Resumen consolidado</span><span><Check size={14} /> Conteo por clase</span><span><Check size={14} /> Detalle por imagen</span><span><Check size={14} /> Estado de cada hallazgo</span></div>
                 <button className="button primary full large" onClick={downloadReport} disabled={busy !== null}>{busy === "report" ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />} Descargar PDF</button>
                 <button className="button secondary full" onClick={() => setView("review")}><ArrowLeft size={15} /> Volver a revisión</button>
@@ -1041,7 +1017,7 @@ export default function App() {
       )}
       </AnimatePresence>
 
-      <footer><span>NeumaDiesel · Proyecto Capstone UCN</span><span><ShieldCheck size={13} /> Frontend y backend desacoplados</span></footer>
+      <footer><span>NeumaDiesel</span></footer>
     </main>
   );
 }

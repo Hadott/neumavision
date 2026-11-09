@@ -253,7 +253,30 @@ Usar variables de entorno para:
 - credenciales o claves externas;
 - configuración del servicio de inferencia.
 
-Mantener un `.env.example` sin secretos reales.
+Usar únicamente el `.env` local ignorado por Git para configuración; no crear ni
+mantener un `.env.example`. Nunca sobrescribir un `.env` existente ni añadir sus
+credenciales a archivos versionados.
+
+### RDS de desarrollo
+
+La instancia RDS de desarrollo es `neumavisiondb`, en `us-east-2`, con endpoint
+`neumavisiondb.c1ka8s46gz5i.us-east-2.rds.amazonaws.com`. La base de datos de la
+aplicación dentro de esa instancia también se llama `neumavisiondb`; conectarse a
+la instancia no selecciona automáticamente la base correcta.
+
+- Base de datos de la aplicación: `neumavisiondb`.
+- Usuario de conexión: `rock_admin`.
+- Puerto: `5432`.
+- URL local en `backend/.env`: `postgresql+psycopg://...@neumavisiondb.c1ka8s46gz5i.us-east-2.rds.amazonaws.com:5432/neumavisiondb`.
+- La contraseña solo debe estar en el `.env` local ignorado por Git; nunca copiarla a este archivo, al chat o a logs.
+- No confundir la base `neumavisiondb` con `rock_detector`, que existe en la instancia pero no es la base usada por la aplicación.
+- Antes de migrar o inicializar, verificar la URL y `SELECT current_database()` para confirmar que el destino es `neumavisiondb`; no ejecutar operaciones de esquema sobre otra base por defecto.
+- El acceso desde un PC requiere que RDS sea públicamente accesible y que el security group asociado permita entrada TCP `5432` desde la IP pública actual del PC como `/32`. No abrir el puerto a `0.0.0.0/0`.
+
+En la última comprobación, `neumavisiondb` contenía las tablas `faena`, `mision`,
+`imagen`, `deteccion`, `informe` y `alembic_version`. Si parecen faltar, primero
+verificar base y esquema seleccionados en el cliente PostgreSQL; no asumir que
+fueron borradas ni recrearlas antes de comprobar el destino.
 
 ## Calidad del código
 
