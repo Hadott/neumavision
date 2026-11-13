@@ -12,3 +12,8 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 *.log
 backend/env
+
+inference/models/
+inference/test_images/
+inference/outputs/
+inference/.venv/

@@ -495,6 +495,31 @@ RabbitMQ, SQS u otras colas pueden evaluarse posteriormente si el volumen de im�
 18. Pruebas.
 19. Despliegue en AWS.
 
+## Clases del modelo de segmentación de caminos
+
+El dataset Roboflow `NeumaVision Caminos`, versión 1, exportado como COCO
+Segmentation, define las siguientes categorías en `_annotations.coco.json`:
+
+| ID | Nombre | Función |
+| --- | --- | --- |
+| 0 | NeumaVision-Caminos | Categoría padre; no es una clase de superficie objetivo. |
+| 1 | Camino | Clase de segmentación. |
+| 2 | Camino Rocoso | Clase de segmentación. |
+
+Fuente: sección `categories` del archivo de validación proporcionado por Peter
+el 13 de noviembre de 2026. Este mapa corresponde al dataset; aplica a los pesos
+entrenados con esas categorías sin remapeo de IDs. No asumir que aplica a futuros
+checkpoints de otro dataset.
+
+La prueba local de segmentación usa `RFDETRSegMedium` y los pesos locales
+`inference/models/weights_seg.pt`. El checkpoint inspeccionado no incluye nombres
+de clases (`args.class_names = None`). `inference/segmentation.py` conserva los
+candidatos con umbral 0 y guarda únicamente la máscara con mayor confianza entre
+ambas clases, incluso si su confianza es inferior a 0,40. Las salidas actuales
+son `inference/outputs/road_mask.png` y `road_overlay.jpg`, y se sobrescriben en
+cada ejecución. Esta prueba no sustituye la arquitectura YOLO del MVP documentada
+arriba.
+
 ## 15. Estado actual
 
 Actualmente:
