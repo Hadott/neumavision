@@ -29,7 +29,8 @@ import {
   UsersRound,
   Wrench,
   X,
-  XCircle
+  XCircle,
+  Ruler
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
@@ -51,11 +52,43 @@ type DashReview = "pending" | "confirmed";
 
 const colorForLabel: Record<string, string> = {
   Rocas: "#f2b23e",
+  "Rocas fuera de pista": "#38bdf8",
   "Carpeta Buen Estado": "#2bb8a8",
   "Material Pedregoso": "#9e82ff"
 };
 
 const fallbackColor = "#4ca8ff";
+type ImageView = "ambas" | "segmentacion" | "rocas";
+const imageViewOptions: { value: ImageView; label: string }[] = [
+  { value: "ambas", label: "Pista + rocas" },
+  { value: "segmentacion", label: "Pista y ancho" },
+  { value: "rocas", label: "Solo rocas" },
+];
+
+// Dentro de cada caja se muestra la foto original (sin la mascara azul del ancho de pista):
+// se usa la misma imagen como fondo, escalada y desplazada para que calce con la caja.
+const originalPatch = (item: Detection, image: MissionImage) => {
+  if (!image.road_width_url) return {};
+  const w = Math.max(item.width, 1e-4);
+  const h = Math.max(item.height, 1e-4);
+  const posX = w < 1 ? (item.x / (1 - w)) * 100 : 0;
+  const posY = h < 1 ? (item.y / (1 - h)) * 100 : 0;
+  return {
+    backgroundImage: `url("${api.imageUrl(image.image_url)}")`,
+    backgroundSize: `${100 / w}% ${100 / h}%`,
+    backgroundPosition: `${posX}% ${posY}%`,
+    backgroundRepeat: "no-repeat",
+  };
+};
+
+// Semaforo del ancho de pista calculado por el modelo de segmentacion
+const widthClass = (estado: string) => {
+  const value = estado.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (value.startsWith("optimo")) return "optimo";
+  if (value.startsWith("moderado")) return "moderado";
+  if (value.startsWith("critico")) return "critico";
+  return "sin";
+};
 const confidence = (value: number) => `${Math.round(value * 100)}%`;
 const statusLabel = (status: string) => (status === "review" ? "En revisión" : "Cargada");
 const formatDate = (value: string) =>
@@ -79,7 +112,9 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState("");
-  const [threshold, setThreshold] = useState(0.65);
+  const [threshold, setThreshold] = useState(0.3);
+  // Vista de la imagen en Revision; la misma opcion define la imagen de cada ficha del informe.
+  const [imageView, setImageView] = useState<ImageView>("ambas");
   const [enabledLabels, setEnabledLabels] = useState<string[]>([]);
   const [missions, setMissions] = useState<MissionSummary[]>([]);
   const [missionsLoading, setMissionsLoading] = useState(false);
@@ -404,7 +439,7 @@ export default function App() {
     setBusy("report");
     setError("");
     try {
-      await api.downloadReport(mission.id);
+      await api.downloadReport(mission.id, imageView);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No fue posible descargar el informe.");
     } finally {
@@ -845,7 +880,7 @@ export default function App() {
           </nav>
 
           {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
-          {health?.detector !== "yolo" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
+          {health?.detector === "mock" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
 
           {view === "upload" && (
             <section className={`workspace upload-layout fade-in-view ${mission ? "has-mission" : ""}`}>
@@ -900,12 +935,12 @@ export default function App() {
                 <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div><Gauge size={20} /></div>
                 <div className="pipeline">
                   <div className={mission ? "complete" : "current"}><span>{mission ? <Check size={14} /> : "1"}</span><div><strong>Validar lote</strong><small>{mission ? `${mission.images.length} imágenes compatibles` : "Esperando imágenes"}</small></div></div>
-                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>{health?.detector === "yolo" ? "Ejecutar detector" : "Análisis simulado"}</strong><small>{health?.detector === "yolo" ? "Modelo de detección disponible" : "Resultados ficticios; no son detecciones reales"}</small></div></div>
+                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>{health?.detector !== "mock" ? "Ejecutar detector" : "Análisis simulado"}</strong><small>{health?.detector !== "mock" ? "Modelo de detección disponible" : "Resultados ficticios; no son detecciones reales"}</small></div></div>
                   <div className={mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "3"}</span><div><strong>Preparar revisión</strong><small>Resultados normalizados por imagen</small></div></div>
                 </div>
                 <div className="process-note"><ShieldCheck size={16} /><span>Las misiones quedan disponibles para revisión y seguimiento.</span></div>
-                {health?.detector !== "yolo" && <div className="admin-account-message error"><AlertTriangle size={14} /> El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
-                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> {health?.detector === "yolo" ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
+                {health?.detector === "mock" && <div className="admin-account-message error"><AlertTriangle size={14} /> El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
+                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> {health?.detector !== "mock" ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
               </aside>
             </section>
           )}
@@ -919,8 +954,8 @@ export default function App() {
                 </div>
                 <div className="threshold">
                   <label><span>Confianza mínima</span><strong>{confidence(threshold)}</strong></label>
-                  <input type="range" min="0.5" max="0.95" step="0.01" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
-                  <small><span>50%</span><span>95%</span></small>
+                  <input type="range" min="0.3" max="0.95" step="0.01" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
+                  <small><span>30%</span><span>95%</span></small>
                 </div>
                 <div className="stats-mini">
                      <div><ScanLine size={15} /><span>Visibles</span><strong><AnimatedNumber value={filteredAll.length} /></strong></div>
@@ -931,10 +966,11 @@ export default function App() {
 
               <div className="viewer-column">
                 <div className="card viewer-card">
-                  <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><span className="pill">{visibleDetections.length} hallazgos</span></div>
+                  <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><div className="image-meta-actions">{selectedImage.road_width_url && <div className="view-switch" role="group" aria-label="Vista de la imagen">{imageViewOptions.map((option) => <button key={option.value} type="button" className={imageView === option.value ? "active" : ""} onClick={() => setImageView(option.value)}>{option.label}</button>)}</div>}{selectedImage.road_width && <span className={`width-badge ${widthClass(selectedImage.road_width.estado)}`} title="Ancho de pista (percentil 10)"><Ruler size={13} />{selectedImage.road_width.confianza_pista != null ? `${selectedImage.road_width.clase_pista ?? "Pista"} ${confidence(selectedImage.road_width.confianza_pista)} · ` : ""}{selectedImage.road_width.ancho_min_m != null ? `${selectedImage.road_width.ancho_min_m.toFixed(1).replace(".", ",")} m` : "—"} · {selectedImage.road_width.estado}</span>}<span className="pill">{visibleDetections.length} hallazgos</span></div></div>
                   <div className="image-stage">
-                    <img src={api.imageUrl(selectedImage.image_url)} alt="Camino minero bajo revisión" />
-                    {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</div>)}
+                    <img src={api.imageUrl(selectedImage.road_width_url && imageView !== "rocas" ? selectedImage.road_width_url : selectedImage.image_url)} alt="Camino minero bajo revisión" />
+                    {imageView !== "segmentacion" && visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
+                    <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
                   </div>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
                 </div>
@@ -1006,8 +1042,8 @@ export default function App() {
                 <span className="export-icon"><FileText size={27} /></span>
                 <span className="overline">Exportación</span>
                 <h2>Informe listo</h2>
-                <p>El PDF reúne los datos actuales de la misión y el estado de revisión.</p>
-                <div className="export-list"><span><Check size={14} /> Resumen consolidado</span><span><Check size={14} /> Conteo por clase</span><span><Check size={14} /> Detalle por imagen</span><span><Check size={14} /> Estado de cada hallazgo</span></div>
+                <p>El PDF se genera en FastAPI con los datos actuales de la misión y el estado de revisión.</p>
+                <div className="export-list"><span><Check size={14} /> Resumen consolidado</span><span><Check size={14} /> Conteo por clase</span><span><Check size={14} /> Detalle por imagen</span><span><Check size={14} /> Estado de cada hallazgo</span><span><Check size={14} /> Imagen de las fichas: {imageViewOptions.find((option) => option.value === imageView)?.label}</span></div>
                 <button className="button primary full large" onClick={downloadReport} disabled={busy !== null}>{busy === "report" ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />} Descargar PDF</button>
                 <button className="button secondary full" onClick={() => setView("review")}><ArrowLeft size={15} /> Volver a revisión</button>
               </aside>

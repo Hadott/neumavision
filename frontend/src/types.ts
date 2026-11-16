@@ -25,6 +25,19 @@ export type MissionImage = {
   image_url: string;
   detections: Detection[];
   criticidad_manual: ManualCriticality | null;
+  road_width?: RoadWidth | null;
+  road_width_url?: string | null;
+};
+
+export type RoadWidth = {
+  estado: string;
+  ancho_min_m: number | null;
+  ancho_mediano_m: number | null;
+  gsd_cm_px: number | null;
+  fuente_gsd: string;
+  eje_medible_pct: number;
+  confianza_pista?: number | null;
+  clase_pista?: string | null;
 };
 
 export type Mission = {

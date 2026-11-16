@@ -13,7 +13,9 @@ frontend/vite.config.d.ts
 *.log
 backend/env
 
+# Artefactos locales y modelos pesados
 inference/models/
 inference/test_images/
 inference/outputs/
 inference/.venv/
+backend/models/
