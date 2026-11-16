@@ -33,6 +33,23 @@ class ImageRead(BaseModel):
     analysis_url: str | None = None
     detections: list[DetectionRead]
     criticidad_manual: ManualCriticality | None = None
+    road_width: "RoadWidthRead | None" = None
+    road_width_url: str | None = None
+
+
+class RoadWidthRead(BaseModel):
+    """Resultado del analisis de ancho de pista (modelo de segmentacion)."""
+    estado: str
+    ancho_min_m: float | None = None
+    ancho_mediano_m: float | None = None
+    gsd_cm_px: float | None = None
+    fuente_gsd: str = ""
+    eje_medible_pct: float = 0.0
+    confianza_pista: float | None = None
+    clase_pista: str | None = None
+
+
+ImageRead.model_rebuild()
 
 
 class MissionRead(BaseModel):

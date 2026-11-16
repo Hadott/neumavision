@@ -47,6 +47,7 @@ LABEL_COLORS = {
     "Rocas": "#f2b23e",
     GOOD_CONDITION_LABEL: "#2bb8a8",
     "Material Pedregoso": "#9e82ff",
+    "Rocas fuera de pista": "#38bdf8",
 }
 FALLBACK_COLOR = "#4ca8ff"
 
@@ -121,40 +122,75 @@ def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     return tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
 
 
-def _annotate_image(image: Imagen, image_detections: list[Deteccion], max_width: int = 1300) -> BytesIO | None:
-    """Draws bounding boxes for non-rejected detections on a resized copy of the photo."""
+def _annotate_image(
+    image: Imagen,
+    image_detections: list[Deteccion],
+    max_width: int = 1300,
+    context_detections: list[Deteccion] | None = None,
+    view: str = "ambas",
+) -> BytesIO | None:
+    """Imagen de la ficha, igual que en la vista de Revision: segmentacion de la pista con el
+    ancho (si existe el analisis) y las cajas de las rocas. Dentro de cada caja se muestra la
+    foto original, sin la mascara. `context_detections` (rocas fuera de la pista) se dibujan
+    solo como referencia y no cuentan como hallazgos.
+
+    view: "ambas" (segmentacion + rocas), "segmentacion" (solo pista y ancho) o "rocas"
+    (foto original con las cajas), segun lo que el usuario eligio en Revision."""
     path = Path(image.ruta_almacenada)
     if not path.exists():
         return None
     try:
         with PILImage.open(path) as source:
-            photo = source.convert("RGB")
+            original = source.convert("RGB")
     except Exception:
         return None
+    photo = original
+    overlay_path = Path(f"{path}.ancho.jpg")
+    if view in ("ambas", "segmentacion") and overlay_path.exists():
+        try:
+            with PILImage.open(overlay_path) as source:
+                candidate = source.convert("RGB")
+            if candidate.size == original.size:
+                photo = candidate
+        except Exception:
+            pass
 
     scale = min(1.0, max_width / photo.width) if photo.width else 1.0
     if scale < 1.0:
-        photo = photo.resize((round(photo.width * scale), round(photo.height * scale)))
+        size = (round(photo.width * scale), round(photo.height * scale))
+        photo = photo.resize(size)
+        original = original.resize(size)
     draw = ImageDraw.Draw(photo)
-    label_font = _load_font(max(14, round(photo.width * 0.014)))
-    stroke = max(2, round(photo.width * 0.0035))
+    tag_font = _load_font(max(11, round(photo.width * 0.010)))
+    stroke = max(2, round(photo.width * 0.0025))
 
-    for detection in image_detections:
-        if detection.estado_revision == "rejected":
-            continue
+    def draw_box(detection: Deteccion) -> None:
         rgb = _hex_to_rgb(LABEL_COLORS.get(detection.clase, FALLBACK_COLOR))
-        left = detection.bbox_x * photo.width
-        top = detection.bbox_y * photo.height
-        right = left + detection.bbox_ancho * photo.width
-        bottom = top + detection.bbox_alto * photo.height
-        draw.rectangle([left, top, right, bottom], outline=rgb, width=stroke)
-        tag = f"{detection.clase} · {detection.confianza:.0%}"
-        text_bbox = draw.textbbox((0, 0), tag, font=label_font)
-        tag_w = text_bbox[2] - text_bbox[0] + 12
-        tag_h = text_bbox[3] - text_bbox[1] + 8
-        tag_top = max(0, top - tag_h)
-        draw.rectangle([left, tag_top, left + tag_w, tag_top + tag_h], fill=rgb)
-        draw.text((left + 6, tag_top + 3), tag, fill=(15, 12, 8), font=label_font)
+        left = round(detection.bbox_x * photo.width)
+        top = round(detection.bbox_y * photo.height)
+        right = round(left + detection.bbox_ancho * photo.width)
+        bottom = round(top + detection.bbox_alto * photo.height)
+        if right > left and bottom > top:
+            photo.paste(original.crop((left, top, right, bottom)), (left, top))  # foto original dentro de la caja
+        draw.rectangle([left - stroke, top - stroke, right + stroke, bottom + stroke], outline=rgb, width=stroke)
+        tag = f"{detection.confianza:.0%}"
+        text_bbox = draw.textbbox((0, 0), tag, font=tag_font)
+        tag_w = text_bbox[2] - text_bbox[0] + 8
+        tag_h = text_bbox[3] - text_bbox[1] + 6
+        cx = (left + right) / 2
+        tag_left = min(max(0, cx - tag_w / 2), photo.width - tag_w)
+        tag_top = max(0, top - stroke - tag_h - 2)
+        draw.rounded_rectangle([tag_left, tag_top, tag_left + tag_w, tag_top + tag_h], radius=3, fill=(15, 20, 24))
+        draw.text((tag_left + 4, tag_top + 2), tag, fill=(255, 255, 255), font=tag_font)
+
+    if view == "segmentacion":
+        context_detections, image_detections = [], []
+    for detection in context_detections or []:
+        if detection.estado_revision != "rejected":
+            draw_box(detection)
+    for detection in image_detections:
+        if detection.estado_revision != "rejected":
+            draw_box(detection)
 
     buffer = BytesIO()
     photo.save(buffer, format="JPEG", quality=85)
@@ -289,7 +325,13 @@ def _draw_tire_watermark(canvas, cx: float, cy: float, r_outer: float, alpha: fl
     canvas.restoreState()
 
 
-def build_report(mission: Mision, images: list[Imagen], detections: list[Deteccion]) -> bytes:
+def build_report(
+    mission: Mision,
+    images: list[Imagen],
+    detections: list[Deteccion],
+    context_detections: list[Deteccion] | None = None,
+    view: str = "ambas",
+) -> bytes:
     styles = _styles()
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -390,7 +432,7 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
         "coverMission", fontName="Helvetica-Bold", fontSize=13.5, textColor=BLACK, spaceAfter=3, leading=17,
     )))
     story.append(Paragraph(mission.tramo, styles["cover_sub"]))
-    if settings.detector_mode.lower() != "yolo":
+    if settings.detector_mode.lower() == "mock":  # solo con el detector simulado
         warning = Table(
             [[Paragraph(
                 "<b>ADVERTENCIA:</b> Análisis simulado. Los resultados son ficticios y no corresponden a detecciones reales.",
@@ -542,6 +584,10 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
     ))
     story.append(Spacer(1, 4 * mm))
 
+    context_by_image: dict[str, list[Deteccion]] = {}
+    for detection in context_detections or []:
+        context_by_image.setdefault(detection.id_imagen, []).append(detection)
+
     card_number = 0
     for image in images:
         image_detections = [d for d in by_image.get(image.id_imagen, []) if d.estado_revision != "rejected"]
@@ -549,8 +595,10 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
             continue
         card_number += 1
 
-        annotated = _annotate_image(image, image_detections)
-        photo_cell = Image(annotated, width=82 * mm, height=82 * mm * image.alto / image.ancho) if annotated else Paragraph("Imagen no disponible", styles["muted"])
+        annotated = _annotate_image(
+            image, image_detections, context_detections=context_by_image.get(image.id_imagen, []), view=view
+        )
+        photo_cell = Image(annotated, width=144 * mm, height=144 * mm * image.alto / image.ancho) if annotated else Paragraph("Imagen no disponible", styles["muted"])
         location_text = (
             f"{image.latitud:.5f}, {image.longitud:.5f}"
             if image.latitud is not None and image.longitud is not None
@@ -575,37 +623,60 @@ def build_report(mission: Mision, images: list[Imagen], detections: list[Detecci
             finding_rows.append(
                 Table(
                     [[Paragraph("Sin hallazgos activos en esta imagen.", styles["muted"])]],
-                    colWidths=[70 * mm],
+                    colWidths=[144 * mm],
                 )
             )
+        # Un bloque por clase (no uno por deteccion): con muchas rocas en una imagen,
+        # un bloque por deteccion hacia que la ficha no cupiera en una pagina.
+        groups: dict[str, list[Deteccion]] = {}
         for detection in image_detections:
-            status_text, status_color = _status_badge(detection.estado_revision)
+            groups.setdefault(detection.clase, []).append(detection)
+        for label, items in groups.items():
+            confidences = sorted((d.confianza for d in items), reverse=True)
+            conf_text = (
+                f"{confidences[0]:.0%}" if len(items) == 1
+                else f"{confidences[-1]:.0%} – {confidences[0]:.0%}"
+            )
+            status_parts = []
+            for status, singular, plural in (
+                ("confirmed", "confirmada", "confirmadas"),
+                ("pending", "pendiente de revisión", "pendientes de revisión"),
+            ):
+                n = sum(1 for d in items if d.estado_revision == status)
+                if n:
+                    _, color = _status_badge(status)
+                    word = singular if n == 1 else plural
+                    status_parts.append(f'<font color="#{color.hexval()[2:]}"><b>{n} {word}</b></font>')
+            count_text = "1 detección" if len(items) == 1 else f"{len(items)} detecciones"
             finding_rows.append(
                 Table(
                     [[
                         Paragraph(
-                            f'<font color="{LABEL_COLORS.get(detection.clase, FALLBACK_COLOR)}">●</font> '
-                            f"<b>{detection.clase}</b> — {detection.confianza:.0%}",
+                            f'<font color="{LABEL_COLORS.get(label, FALLBACK_COLOR)}">●</font> '
+                            f"<b>{label}</b> — {count_text}",
                             styles["card_title"],
                         ),
                     ], [
-                        Paragraph(f'<font color="#{status_color.hexval()[2:]}"><b>{status_text}</b></font>', styles["muted"]),
+                        Paragraph(f"Confianza del modelo: {conf_text}", styles["muted"]),
                     ], [
-                        Paragraph(RECOMMENDATIONS.get(detection.clase, DEFAULT_RECOMMENDATION), styles["body"]),
+                        Paragraph(" · ".join(status_parts) or "—", styles["muted"]),
+                    ], [
+                        Paragraph(RECOMMENDATIONS.get(label, DEFAULT_RECOMMENDATION), styles["body"]),
                     ]],
-                    colWidths=[70 * mm],
+                    colWidths=[144 * mm],
                     style=TableStyle([
                         ("TOPPADDING", (0, 0), (-1, -1), 1),
                         ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
-                        ("BOTTOMPADDING", (0, 1), (-1, 1), 3),
-                        ("BOTTOMPADDING", (0, 2), (-1, 2), 8),
+                        ("BOTTOMPADDING", (0, 1), (-1, 2), 3),
+                        ("BOTTOMPADDING", (0, 3), (-1, 3), 8),
                     ]),
                 )
             )
 
+        # Imagen a todo el ancho (segmentacion + ancho + rocas, como en Revision) y debajo los hallazgos.
         card_table = Table(
-            [[photo_block, finding_rows]],
-            colWidths=[86 * mm, 74 * mm],
+            [[photo_block], [finding_rows]],
+            colWidths=[160 * mm],
         )
         card_table.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),

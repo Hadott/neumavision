@@ -1,4 +1,7 @@
+import json
+import os
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from random import Random
 from typing import Protocol
@@ -131,11 +134,147 @@ class YoloDetector:
         return results
 
 
+def _device() -> str:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
+ROCK_LABEL = "Rocas"
+OFF_ROAD_LABEL = "Rocas fuera de pista"
+
+
+def width_paths(image_path: Path) -> tuple[Path, Path]:
+    """Archivos que acompanan a cada imagen con el analisis de ancho de pista."""
+    return Path(f"{image_path}.ancho.jpg"), Path(f"{image_path}.ancho.json")
+
+
+class NeumaVisionDetector:
+    """Pipeline completo de NeumaVision:
+
+    1. Modelo de pista (RF-DETR Seg) -> mascara del camino.
+    2. Modelo de rocas (YOLO26) con tiling, para conservar la escala del entrenamiento.
+    3. Filtro espacial: solo se reportan rocas sobre la pista.
+    4. Ancho de pista con semaforo; se guarda junto a la imagen (<imagen>.ancho.jpg / .json).
+    """
+
+
+    def __init__(self) -> None:
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        for path in (settings.rock_model_path, settings.road_model_path):
+            if not Path(path).exists():
+                raise RuntimeError(f"Modelo no encontrado en {path}")
+        try:
+            from rfdetr import RFDETRSegMedium
+            from ultralytics import YOLO
+        except ImportError as error:
+            raise RuntimeError("Instala ultralytics, rfdetr y scikit-image para DETECTOR_MODE=neumavision") from error
+        self.device = _device()
+        self.rock_model = YOLO(str(settings.rock_model_path))
+        self.road_model = RFDETRSegMedium(pretrain_weights=str(settings.road_model_path))
+
+    # ---- rocas ----
+    def _rocks(self, rgb) -> list[tuple[float, float, float, float, float]]:
+        import numpy as np
+
+        h, w = rgb.shape[:2]
+        cols = max(1, round(w / settings.tile_width))
+        rows = max(1, round(h / settings.tile_height))
+        tw, th = w / cols, h / rows
+        tiles, offsets = [], []
+        for r in range(rows):
+            for c in range(cols):
+                x0, y0 = int(round(c * tw)), int(round(r * th))
+                x1, y1 = int(round((c + 1) * tw)), int(round((r + 1) * th))
+                tiles.append(np.ascontiguousarray(rgb[y0:y1, x0:x1, ::-1]))  # BGR para ultralytics
+                offsets.append((x0, y0))
+        boxes = []
+        results = self.rock_model.predict(
+            tiles, imgsz=settings.tile_width, conf=settings.rock_confidence, iou=0.6,
+            max_det=600, device=self.device, verbose=False,
+        )
+        for (ox, oy), result in zip(offsets, results):
+            for xyxy, conf in zip(result.boxes.xyxy.tolist(), result.boxes.conf.tolist()):
+                x1, y1, x2, y2 = xyxy
+                boxes.append((x1 + ox, y1 + oy, x2 + ox, y2 + oy, float(conf)))
+        return boxes
+
+    # ---- pista ----
+    def _road_mask(self, rgb):
+        """Mascara limpia de la pista y la confianza del modelo de segmentacion."""
+        from app.services import ancho_pista
+
+        mask, conf, clase = ancho_pista.mascara_pista_conf(self.road_model, rgb, settings.road_confidence)
+        return ancho_pista.limpiar(mask), conf, clase
+
+    def predict(self, image_path: Path) -> list[DetectionResult]:
+        import cv2
+        import numpy as np
+
+        from app.services import ancho_pista
+
+        bgr = cv2.imread(str(image_path))
+        if bgr is None:
+            return []
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        h, w = rgb.shape[:2]
+
+        mask, road_conf, road_class = self._road_mask(rgb)
+        has_road = bool(mask.any())
+
+        # ancho de pista
+        gsd = ancho_pista.gsd_desde_exif(str(image_path), w)
+        source = "EXIF"
+        if not gsd and settings.default_gsd_cm_px:
+            gsd, source = settings.default_gsd_cm_px, "configurado"
+        if not gsd:
+            source = "sin GSD"
+        overlay, summary = ancho_pista.analizar(bgr, mask, gsd, source, conf_pista=road_conf, clase_pista=road_class)
+        overlay_path, json_path = width_paths(image_path)
+        cv2.imwrite(str(overlay_path), overlay, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        json_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+
+        # rocas filtradas por la pista (margen para bermas/bordes)
+        if has_road:
+            k = max(3, int(min(h, w) * settings.road_margin)) | 1
+            road = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        # Rocas sobre la pista -> "Rocas"; fuera de la pista -> "Rocas fuera de pista"
+        # (se muestran en revision con otro color, pero no cuentan como hallazgo del informe).
+        results: list[DetectionResult] = []
+        for x1, y1, x2, y2, conf in self._rocks(rgb):
+            cx, cy = int((x1 + x2) / 2), int((y1 + y2) / 2)
+            inside = (not has_road) or bool(road[min(cy, h - 1), min(cx, w - 1)])
+            results.append(
+                DetectionResult(
+                    label=ROCK_LABEL if inside else OFF_ROAD_LABEL,
+                    confidence=round(conf, 4),
+                    x=x1 / w, y=y1 / h, width=(x2 - x1) / w, height=(y2 - y1) / h,
+                )
+            )
+        return results
+
+
+@lru_cache(maxsize=1)
+def _neumavision_detector() -> NeumaVisionDetector:
+    # Los modelos se cargan una sola vez por proceso.
+    return NeumaVisionDetector()
+
+
 def get_detector() -> Detector:
-    if settings.detector_mode.lower() == "remote":
+    mode = settings.detector_mode.lower()
+    if mode == "remote":
         return RemoteDetector()
-    if settings.detector_mode.lower() == "yolo":
+    if mode == "neumavision":
+        return _neumavision_detector()
+    if mode == "yolo":
         return YoloDetector(settings.yolo_model_path)
     if settings.detector_mode.lower() == "mock":
         return MockDetector()
-    raise DetectorError("DETECTOR_MODE debe ser remote, yolo o mock")
+    raise DetectorError("DETECTOR_MODE debe ser remote, neumavision, yolo o mock")

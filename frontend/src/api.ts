@@ -160,8 +160,8 @@ export const api = {
     return currentSession ? `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(currentSession.token)}` : url;
   },
 
-  downloadReport: async (missionId: string) => {
-    const response = await fetch(`${API_URL}/missions/${missionId}/report`, { headers: authHeaders() });
+  downloadReport: async (missionId: string, view: "ambas" | "segmentacion" | "rocas" = "ambas") => {
+    const response = await fetch(`${API_URL}/missions/${missionId}/report?vista=${view}`, { headers: authHeaders() });
     if (response.status === 401) onUnauthorized?.();
     if (!response.ok) throw new Error("No fue posible generar el informe");
     const blob = await response.blob();

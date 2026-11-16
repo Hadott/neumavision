@@ -5,6 +5,7 @@ from app.database import get_session
 from app.models import Deteccion, Faena, Imagen, Mision
 from app.schemas import DashboardFinding
 from app.services.auth import CurrentFaena, is_admin
+from app.services.detector import OFF_ROAD_LABEL
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -27,6 +28,7 @@ def list_findings(
         .where(Deteccion.id_imagen == Imagen.id_imagen)
         .where(Imagen.id_mision == Mision.id_mision)
         .where(Deteccion.estado_revision != "rejected")
+        .where(Deteccion.clase != OFF_ROAD_LABEL)  # las rocas fuera de la pista no son hallazgos
     )
     # Cada faena ve solo sus hallazgos; el administrador ve todos o filtra por faena.
     if not is_admin(cuenta):

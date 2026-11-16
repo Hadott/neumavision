@@ -1,3 +1,4 @@
+import json
 import shutil
 from datetime import datetime, timezone
 from io import BytesIO
@@ -19,10 +20,11 @@ from app.schemas import (
     ImageCriticalityUpdate,
     ImageRead,
     MissionRead,
+    RoadWidthRead,
     MissionSummary,
 )
 from app.services.auth import CurrentFaena, is_admin
-from app.services.detector import DetectorError, get_detector, overlay_path
+from app.services.detector import DetectorError, OFF_ROAD_LABEL, get_detector, overlay_path, width_paths
 from app.services.metadata import extract_gps
 from app.services.report import build_report
 from app.services.storage import ALLOWED_CONTENT_TYPES, mission_directory, save_upload
@@ -46,8 +48,41 @@ def serialize_detection(detection: Deteccion) -> DetectionRead:
     )
 
 
+def read_road_width(image: Imagen) -> RoadWidthRead | None:
+    """Lee el analisis de ancho guardado junto a la imagen por el detector NeumaVision."""
+    _, json_path = width_paths(Path(image.ruta_almacenada))
+    if not json_path.exists():
+        return None
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    number = lambda value: float(value) if value not in ("", None) else None
+    return RoadWidthRead(
+        estado=str(data.get("estado", "Sin medición")),
+        ancho_min_m=number(data.get("ancho_min_p10_m")),
+        ancho_mediano_m=number(data.get("ancho_mediano_m")),
+        gsd_cm_px=number(data.get("gsd_cm_px")),
+        fuente_gsd=str(data.get("fuente_gsd", "")),
+        eje_medible_pct=float(data.get("eje_medible_pct") or 0),
+        confianza_pista=number(data.get("confianza_pista")),
+        clase_pista=str(data.get("clase_pista") or "") or None,
+    )
+
+
+def width_version(image: Imagen) -> int:
+    """Version del analisis de ancho (fecha del archivo). Va en la URL para que el navegador
+    no muestre una imagen antigua guardada en cache despues de volver a ejecutar la deteccion."""
+    overlay_path, _ = width_paths(Path(image.ruta_almacenada))
+    try:
+        return int(overlay_path.stat().st_mtime)
+    except OSError:
+        return 0
+
+
 def serialize_image(session: Session, mission_id: str, image: Imagen) -> ImageRead:
     detections = session.exec(select(Deteccion).where(Deteccion.id_imagen == image.id_imagen)).all()
+    road_width = read_road_width(image)
     return ImageRead(
         id=image.id_imagen,
         filename=image.nombre_archivo,
@@ -60,6 +95,12 @@ def serialize_image(session: Session, mission_id: str, image: Imagen) -> ImageRe
                       if overlay_path(Path(image.ruta_almacenada)).is_file() else None),
         detections=[serialize_detection(item) for item in detections],
         criticidad_manual=image.criticidad_manual,
+        road_width=road_width,
+        road_width_url=(
+            f"/api/v1/missions/{mission_id}/images/{image.id_imagen}/ancho?v={width_version(image)}"
+            if road_width
+            else None
+        ),
     )
 
 
@@ -198,7 +239,11 @@ def list_missions(
         images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
         image_ids = [image.id_imagen for image in images]
         detections = (
-            session.exec(select(Deteccion).where(Deteccion.id_imagen.in_(image_ids))).all()
+            session.exec(
+                select(Deteccion)
+                .where(Deteccion.id_imagen.in_(image_ids))
+                .where(Deteccion.clase != OFF_ROAD_LABEL)
+            ).all()
             if image_ids
             else []
         )
@@ -372,8 +417,29 @@ def get_image(mission_id: str, image_id: str, cuenta: CurrentFaena,
     )
 
 
+@router.get("/{mission_id}/images/{image_id}/ancho")
+def get_road_width_image(
+    mission_id: str, image_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)
+) -> FileResponse:
+    """Imagen anotada con el ancho de pista (eje, lineas transversales y semaforo)."""
+    require_mission(session, mission_id, cuenta)
+    image = session.get(Imagen, image_id)
+    if not image or image.id_mision != mission_id:
+        raise HTTPException(status_code=404, detail="Image not found")
+    overlay_path, _ = width_paths(Path(image.ruta_almacenada))
+    if not overlay_path.exists():
+        raise HTTPException(status_code=404, detail="Esta imagen no tiene análisis de ancho")
+    return FileResponse(overlay_path, media_type="image/jpeg")
+
+
 @router.get("/{mission_id}/report")
-def get_report(mission_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)) -> Response:
+def get_report(
+    mission_id: str,
+    cuenta: CurrentFaena,
+    vista: str = Query(default="ambas", pattern="^(ambas|segmentacion|rocas)$"),
+    session: Session = Depends(get_session),
+) -> Response:
+    """vista: tipo de imagen de cada ficha, igual a la opcion elegida en Revision."""
     mission = require_mission(session, mission_id, cuenta)
     images = list(session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all())
     image_ids = [image.id_imagen for image in images]
@@ -382,7 +448,13 @@ def get_report(mission_id: str, cuenta: CurrentFaena, session: Session = Depends
         if image_ids
         else []
     )
-    report = build_report(mission, images, detections)
+    # El informe solo incluye rocas sobre la pista y las imagenes que tienen al menos una.
+    off_road = [item for item in detections if item.clase == OFF_ROAD_LABEL]
+    detections = [item for item in detections if item.clase != OFF_ROAD_LABEL]
+    with_findings = {item.id_imagen for item in detections if item.estado_revision != "rejected"}
+    images = [image for image in images if image.id_imagen in with_findings]
+    # Las rocas fuera de la pista solo se dibujan en la imagen como referencia (no son hallazgos).
+    report = build_report(mission, images, detections, context_detections=off_road, view=vista)
     return Response(
         content=report,
         media_type="application/pdf",

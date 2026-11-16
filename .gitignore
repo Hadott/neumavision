@@ -13,7 +13,15 @@ frontend/vite.config.d.ts
 *.log
 backend/env
 
+# Artefactos locales y modelos pesados
 inference/models/
 inference/test_images/
 inference/outputs/
 inference/.venv/
+backend/models/
+backend/venv/
+Claude outputs/
+.DS_Store
+backend/.DS_Store
+frontend/.DS_Store
+frontend/src/.DS_Store

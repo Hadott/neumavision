@@ -10,3 +10,8 @@ pillow==11.3.0
 reportlab==4.4.3
 pytest==8.4.1
 httpx==0.28.1
+# Modelos NeumaVision (DETECTOR_MODE=neumavision)
+ultralytics
+rfdetr
+scikit-image
+opencv-python
