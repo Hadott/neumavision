@@ -1,5 +1,6 @@
 
 import argparse
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -14,6 +15,38 @@ OUTPUT_DIR = BASE_DIR / "outputs"
 
 # Conservar todos los candidatos para seleccionar el de mayor confianza.
 CONFIDENCE = 0.0
+
+
+def select_road_mask(detections, height: int, width: int):
+    road_mask = np.zeros((height, width), dtype=np.uint8)
+    if detections.mask is None or len(detections.mask) == 0:
+        return road_mask, None
+    best_index = int(np.argmax(detections.confidence))
+    mask = detections.mask[best_index]
+    if mask.shape != (height, width):
+        mask = cv2.resize(mask.astype(np.uint8), (width, height),
+                          interpolation=cv2.INTER_NEAREST)
+    road_mask = mask.astype(np.uint8) * 255
+    return road_mask, {
+        "confidence": float(detections.confidence[best_index]),
+        "class_id": int(detections.class_id[best_index]),
+    }
+
+
+@lru_cache(maxsize=1)
+def load_model(weights: Path):
+    if not weights.is_file():
+        raise FileNotFoundError(f"No se encontraron los pesos: {weights}")
+    print("Cargando RF-DETR...")
+    return RFDETRSegMedium(pretrain_weights=str(weights))
+
+
+def predict_road(image, weights: Path = WEIGHTS):
+    model = load_model(weights)
+    print("Ejecutando segmentacion...")
+    detections = model.predict(cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
+                               threshold=CONFIDENCE)
+    return select_road_mask(detections, *image.shape[:2])
 
 
 def main(image_path: Path | None = None):
@@ -42,30 +75,12 @@ def main(image_path: Path | None = None):
     print("Imagen:", image_path.name)
     print("Resolucion:", width, "x", height)
 
-    print("Cargando RF-DETR...")
-    model = RFDETRSegMedium(pretrain_weights=str(WEIGHTS))
+    road_mask, selected = predict_road(image)
 
-    print("Ejecutando segmentacion...")
-    detections = model.predict(
-        cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
-        threshold=CONFIDENCE
-    )
-
-    road_mask = np.zeros((height, width), dtype=np.uint8)
-
-    if detections.mask is not None and len(detections.mask) > 0:
-        best_index = int(np.argmax(detections.confidence))
-        mask = detections.mask[best_index]
-        if mask.shape != (height, width):
-            mask = cv2.resize(
-                mask.astype(np.uint8),
-                (width, height),
-                interpolation=cv2.INTER_NEAREST
-            )
-        road_mask = mask.astype(np.uint8) * 255
+    if selected is not None:
         print("Confianza de la mascara seleccionada:",
-              f"{detections.confidence[best_index]:.4f}")
-        print("Clase:", detections.class_id[best_index])
+              f"{selected['confidence']:.4f}")
+        print("Clase:", selected["class_id"])
         print("Cobertura de la mascara:",
               f"{np.count_nonzero(road_mask) / road_mask.size:.1%}")
     else:
@@ -79,8 +94,7 @@ def main(image_path: Path | None = None):
     cv2.imwrite(str(OUTPUT_DIR / "road_mask.png"), road_mask)
     cv2.imwrite(str(OUTPUT_DIR / "road_overlay.jpg"), result)
 
-    print("Mascaras detectadas:",
-          0 if detections.mask is None else len(detections.mask))
+    print("Mascara seleccionada:", selected is not None)
     print("Resultados guardados en outputs/")
 
 

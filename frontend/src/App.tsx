@@ -79,7 +79,7 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState("");
-  const [threshold, setThreshold] = useState(0.65);
+  const [threshold, setThreshold] = useState(0.30);
   const [enabledLabels, setEnabledLabels] = useState<string[]>([]);
   const [missions, setMissions] = useState<MissionSummary[]>([]);
   const [missionsLoading, setMissionsLoading] = useState(false);
@@ -845,7 +845,7 @@ export default function App() {
           </nav>
 
           {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
-          {health?.detector !== "yolo" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
+          {health?.detector === "mock" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
 
           {view === "upload" && (
             <section className={`workspace upload-layout fade-in-view ${mission ? "has-mission" : ""}`}>
@@ -900,12 +900,12 @@ export default function App() {
                 <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div><Gauge size={20} /></div>
                 <div className="pipeline">
                   <div className={mission ? "complete" : "current"}><span>{mission ? <Check size={14} /> : "1"}</span><div><strong>Validar lote</strong><small>{mission ? `${mission.images.length} imágenes compatibles` : "Esperando imágenes"}</small></div></div>
-                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>{health?.detector === "yolo" ? "Ejecutar detector" : "Análisis simulado"}</strong><small>{health?.detector === "yolo" ? "Modelo de detección disponible" : "Resultados ficticios; no son detecciones reales"}</small></div></div>
+                  <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>{(health?.detector === "yolo" || health?.detector === "remote") ? "Ejecutar detector" : "Análisis simulado"}</strong><small>{(health?.detector === "yolo" || health?.detector === "remote") ? "Modelo de detección disponible" : "Resultados ficticios; no son detecciones reales"}</small></div></div>
                   <div className={mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "3"}</span><div><strong>Preparar revisión</strong><small>Resultados normalizados por imagen</small></div></div>
                 </div>
                 <div className="process-note"><ShieldCheck size={16} /><span>Las misiones quedan disponibles para revisión y seguimiento.</span></div>
-                {health?.detector !== "yolo" && <div className="admin-account-message error"><AlertTriangle size={14} /> El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
-                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> {health?.detector === "yolo" ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
+                {health?.detector === "mock" && <div className="admin-account-message error"><AlertTriangle size={14} /> El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
+                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> {(health?.detector === "yolo" || health?.detector === "remote") ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
               </aside>
             </section>
           )}
@@ -919,8 +919,8 @@ export default function App() {
                 </div>
                 <div className="threshold">
                   <label><span>Confianza mínima</span><strong>{confidence(threshold)}</strong></label>
-                  <input type="range" min="0.5" max="0.95" step="0.01" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
-                  <small><span>50%</span><span>95%</span></small>
+                  <input type="range" min="0.3" max="0.95" step="0.01" value={threshold} onChange={(event) => setThreshold(Number(event.target.value))} />
+                  <small><span>30%</span><span>95%</span></small>
                 </div>
                 <div className="stats-mini">
                      <div><ScanLine size={15} /><span>Visibles</span><strong><AnimatedNumber value={filteredAll.length} /></strong></div>
@@ -933,7 +933,7 @@ export default function App() {
                 <div className="card viewer-card">
                   <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><span className="pill">{visibleDetections.length} hallazgos</span></div>
                   <div className="image-stage">
-                    <img src={api.imageUrl(selectedImage.image_url)} alt="Camino minero bajo revisión" />
+                    <img src={api.imageUrl(selectedImage.analysis_url ?? selectedImage.image_url)} alt="Camino minero bajo revisión" />
                     {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor }}><span style={{ background: colorForLabel[item.label] ?? fallbackColor }}>{item.label} · {confidence(item.confidence)}</span>{item.review_status === "confirmed" && <i style={{ background: colorForLabel[item.label] ?? fallbackColor }}><Check size={11} /></i>}</div>)}
                   </div>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>

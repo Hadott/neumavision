@@ -520,7 +520,41 @@ son `inference/outputs/road_mask.png` y `road_overlay.jpg`, y se sobrescriben en
 cada ejecución. Esta prueba no sustituye la arquitectura YOLO del MVP documentada
 arriba.
 
+## Prueba local del detector de rocas
+
+`inference/detection.py` permite probar el detector YOLO26l con el checkpoint
+`inference/models/weights_det.pt`, separado de `weights_seg.pt` (RF-DETR).
+Recibe una imagen, confianza configurable (0,30 por defecto), resolución de
+inferencia y dispositivo. Guarda cajas en píxeles en JSON y una imagen anotada.
+Usa grilla 2×3 sin solapamiento (tiles 1280×1080 para fotos 3840×2160), letterbox
+cuadrado a 1280 y max_det=600 por tile. Traslada las cajas a la foto original.
+Ver `inference/README.md`. Aún no aplica máscara del camino y no
+cambia la integración del backend. Antes de validar resultados, comprobar que
+el archivo de detección sea el checkpoint YOLO correcto: durante la revisión del
+16 de noviembre ambos archivos locales tenían el mismo SHA-256.
+
+## Cruce local de segmentación y detección
+
+`inference/pipeline.py` ejecuta RF-DETR sobre la foto completa y YOLO por tiles,
+reutilizando la selección de máscara de mayor confianza en `segmentation.py`.
+`postprocessing.py` conserva todos los hallazgos y marca alarma si la caja de
+una roca intersecta al menos un píxel de esa máscara. No es una intersección
+de máscaras de instancia: YOLO devuelve cajas. Sin máscara, el cruce y las
+alarmas quedan indeterminados (`null`), no se declaran seguros. Genera máscara,
+imagen combinada y JSON locales; no cambia API, base de datos ni notificaciones.
+
 ## 15. Estado actual
+
+La plataforma dispone del modo `DETECTOR_MODE=remote`: el backend llama por HTTP
+a `inference/api.py`, que ejecuta RF-DETR y YOLO con el pipeline validado. Solo
+las rocas cuya caja intersecta la máscara se persisten en DETECCION; las rocas
+fuera del camino son candidatos de diagnóstico. No se crean nuevas entidades.
+La ausencia de máscara es un error de cruce, no un resultado sin hallazgos.
+El visor muestra la máscara verde (clase 1) o naranja (clase 2) con etiqueta sin
+confianza y las cajas interactivas de los hallazgos. Las imágenes derivadas se
+sirven con autorización por faena. La inferencia no accede a RDS ni S3; los
+archivos continúan locales hasta implementar S3. Variables y arranque en
+`inference/README.md`. La activación se hace por entorno sin sobrescribir `.env`.
 
 Actualmente:
 

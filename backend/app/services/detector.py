@@ -3,6 +3,12 @@ from pathlib import Path
 from random import Random
 from typing import Protocol
 
+import base64
+from io import BytesIO
+
+import httpx
+from PIL import Image
+
 from app.config import settings
 
 
@@ -18,6 +24,54 @@ class DetectionResult:
 
 class Detector(Protocol):
     def predict(self, image_path: Path) -> list[DetectionResult]: ...
+
+
+class DetectorError(RuntimeError):
+    """El fallo de inferencia no equivale a cero hallazgos."""
+
+
+def overlay_path(image_path: Path) -> Path:
+    return image_path.with_suffix(image_path.suffix + ".vision.jpg")
+
+
+class RemoteDetector:
+    def predict(self, image_path: Path) -> list[DetectionResult]:
+        try:
+            headers = ({"Authorization": f"Bearer {settings.inference_token}"}
+                       if settings.inference_token else {})
+            with image_path.open("rb") as stream:
+                response = httpx.post(
+                    settings.inference_url.rstrip("/") + "/predict",
+                    files={"file": (image_path.name, stream, "application/octet-stream")},
+                    headers=headers, timeout=settings.inference_timeout,
+                )
+            response.raise_for_status()
+            payload = response.json()
+            with Image.open(image_path) as original:
+                width, height = original.size
+            if payload["width"] != width or payload["height"] != height:
+                raise ValueError("Dimensiones de inferencia inconsistentes")
+            results = []
+            for item in payload["detections"]:
+                if item["alarm"] is not True:
+                    raise ValueError("El servicio devolvio candidatos fuera del camino")
+                x1, y1, x2, y2 = item["bbox"]
+                confidence = float(item["confidence"])
+                if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
+                        and 0 <= confidence <= 1):
+                    raise ValueError("Deteccion invalida")
+                results.append(DetectionResult("Rocas", confidence, x1 / width,
+                                               y1 / height, (x2-x1) / width,
+                                               (y2-y1) / height))
+            overlay = base64.b64decode(payload["overlay_jpeg"], validate=True)
+            with Image.open(BytesIO(overlay)) as rendered:
+                if rendered.size != (width, height) or rendered.format != "JPEG":
+                    raise ValueError("Imagen procesada invalida")
+                rendered.verify()
+            overlay_path(image_path).write_bytes(overlay)
+            return results
+        except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as error:
+            raise DetectorError("No se pudo analizar la imagen con el servicio de inferencia") from error
 
 
 class MockDetector:
@@ -78,6 +132,10 @@ class YoloDetector:
 
 
 def get_detector() -> Detector:
+    if settings.detector_mode.lower() == "remote":
+        return RemoteDetector()
     if settings.detector_mode.lower() == "yolo":
         return YoloDetector(settings.yolo_model_path)
-    return MockDetector()
+    if settings.detector_mode.lower() == "mock":
+        return MockDetector()
+    raise DetectorError("DETECTOR_MODE debe ser remote, yolo o mock")

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageDraw
 from sqlmodel import Session, delete, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.database import get_session
@@ -21,7 +22,7 @@ from app.schemas import (
     MissionSummary,
 )
 from app.services.auth import CurrentFaena, is_admin
-from app.services.detector import get_detector
+from app.services.detector import DetectorError, get_detector, overlay_path
 from app.services.metadata import extract_gps
 from app.services.report import build_report
 from app.services.storage import ALLOWED_CONTENT_TYPES, mission_directory, save_upload
@@ -55,6 +56,8 @@ def serialize_image(session: Session, mission_id: str, image: Imagen) -> ImageRe
         latitude=image.latitud,
         longitude=image.longitud,
         image_url=f"/api/v1/missions/{mission_id}/images/{image.id_imagen}",
+        analysis_url=(f"/api/v1/missions/{mission_id}/images/{image.id_imagen}?analysis=true"
+                      if overlay_path(Path(image.ruta_almacenada)).is_file() else None),
         detections=[serialize_detection(item) for item in detections],
         criticidad_manual=image.criticidad_manual,
     )
@@ -244,25 +247,35 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
     mission = require_mission(session, mission_id, cuenta)
     images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
     image_ids = [image.id_imagen for image in images]
-    if image_ids:
-        session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
-    detector = get_detector()
-    for image in images:
-        for prediction in detector.predict(Path(image.ruta_almacenada)):
-            session.add(
-                Deteccion(
-                    id_imagen=image.id_imagen,
-                    clase=prediction.label,
-                    confianza=prediction.confidence,
-                    bbox_x=prediction.x,
-                    bbox_y=prediction.y,
-                    bbox_ancho=prediction.width,
-                    bbox_alto=prediction.height,
+    try:
+        detector = get_detector()
+        predictions = [(image, detector.predict(Path(image.ruta_almacenada))) for image in images]
+        if image_ids:
+            session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
+        for image, findings in predictions:
+            for prediction in findings:
+                session.add(
+                    Deteccion(
+                        id_imagen=image.id_imagen,
+                        clase=prediction.label,
+                        confianza=prediction.confidence,
+                        bbox_x=prediction.x,
+                        bbox_y=prediction.y,
+                        bbox_ancho=prediction.width,
+                        bbox_alto=prediction.height,
+                    )
                 )
-            )
-    mission.estado = "review"
-    session.add(mission)
-    session.commit()
+            image.estado_proceso = "completed"
+            session.add(image)
+        mission.estado = "review"
+        session.add(mission)
+        session.commit()
+    except DetectorError as error:
+        session.rollback()
+        raise HTTPException(502, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        session.rollback()
+        raise HTTPException(503, detail="No se pudieron guardar los hallazgos") from error
     session.refresh(mission)
     return serialize_mission(session, mission)
 
@@ -343,14 +356,18 @@ def update_image_criticality(
 
 
 @router.get("/{mission_id}/images/{image_id}")
-def get_image(mission_id: str, image_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)) -> FileResponse:
+def get_image(mission_id: str, image_id: str, cuenta: CurrentFaena,
+              analysis: bool = False, session: Session = Depends(get_session)) -> FileResponse:
     require_mission(session, mission_id, cuenta)
     image = session.get(Imagen, image_id)
     if not image or image.id_mision != mission_id:
         raise HTTPException(status_code=404, detail="Image not found")
+    path = overlay_path(Path(image.ruta_almacenada)) if analysis else Path(image.ruta_almacenada)
+    if not path.is_file():
+        raise HTTPException(404, detail="Image not found")
     return FileResponse(
-        image.ruta_almacenada,
-        media_type=image.tipo_contenido,
+        path,
+        media_type="image/jpeg" if analysis else image.tipo_contenido,
         filename=image.nombre_archivo,
     )
 

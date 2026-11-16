@@ -30,6 +30,7 @@ class ImageRead(BaseModel):
     latitude: float | None
     longitude: float | None
     image_url: str
+    analysis_url: str | None = None
     detections: list[DetectionRead]
     criticidad_manual: ManualCriticality | None = None
 

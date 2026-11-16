@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("./data/uploads")
     detector_mode: str = "mock"
     yolo_model_path: Path = Path("./models/best.pt")
+    inference_url: str = "http://127.0.0.1:8001"
+    inference_token: str = ""
+    inference_timeout: float = Field(default=300, gt=0)
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
     development_faena_id: str = "00000000-0000-0000-0000-000000000001"
     development_faena_name: str = "NeumaDiesel"

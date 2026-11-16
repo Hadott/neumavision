@@ -23,6 +23,7 @@ export type MissionImage = {
   latitude: number | null;
   longitude: number | null;
   image_url: string;
+  analysis_url?: string | null;
   detections: Detection[];
   criticidad_manual: ManualCriticality | null;
 };
