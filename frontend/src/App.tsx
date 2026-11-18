@@ -51,7 +51,7 @@ type Busy = "upload" | "detect" | "report" | "open" | null;
 type DashReview = "pending" | "confirmed";
 
 const colorForLabel: Record<string, string> = {
-  Rocas: "#f2b23e",
+  Rocas: "#dc2626",
   "Rocas fuera de pista": "#38bdf8",
   "Carpeta Buen Estado": "#2bb8a8",
   "Material Pedregoso": "#9e82ff"
@@ -90,6 +90,11 @@ const widthClass = (estado: string) => {
   return "sin";
 };
 const confidence = (value: number) => `${Math.round(value * 100)}%`;
+const filenameOrder = new Intl.Collator("es-CL", { numeric: true });
+const formatDuration = (milliseconds: number) => {
+  const seconds = Math.round(milliseconds / 1000);
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+};
 const statusLabel = (status: string) => (status === "review" ? "En revisión" : "Cargada");
 const formatDate = (value: string) =>
   new Date(value).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
@@ -111,6 +116,9 @@ export default function App() {
   const [segment, setSegment] = useState("");
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
+  const [detectionStart, setDetectionStart] = useState<{ missionId: string; timestamp: number } | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [detectionTime, setDetectionTime] = useState<{ missionId: string; milliseconds: number } | null>(null);
   const [error, setError] = useState("");
   const [threshold, setThreshold] = useState(0.3);
   // Vista de la imagen en Revision; la misma opcion define la imagen de cada ficha del informe.
@@ -166,14 +174,24 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen, session?.token, faenaFiltro]);
 
+  const orderedImages = useMemo(() => [...(mission?.images ?? [])].sort(
+    (left, right) => filenameOrder.compare(left.filename, right.filename) || left.id.localeCompare(right.id)
+  ), [mission]);
+
   useEffect(() => {
     if (!mission?.images.length) return;
     if (!selectedImageId || !mission.images.some((image) => image.id === selectedImageId)) {
-      setSelectedImageId(mission.images[0].id);
+      setSelectedImageId(orderedImages[0].id);
     }
     const labels = Array.from(new Set(mission.images.flatMap((image) => image.detections.map((item) => item.label))));
     if (labels.length) setEnabledLabels((current) => current.length ? current.filter((label) => labels.includes(label)) : labels);
-  }, [mission, selectedImageId]);
+  }, [mission, orderedImages, selectedImageId]);
+
+  useEffect(() => {
+    if (!detectionStart) return;
+    const interval = window.setInterval(() => setElapsed(performance.now() - detectionStart.timestamp), 250);
+    return () => window.clearInterval(interval);
+  }, [detectionStart]);
 
   const allDetections = useMemo(
     () => mission?.images.flatMap((image) => image.detections) ?? [],
@@ -183,7 +201,7 @@ export default function App() {
     () => Array.from(new Set(allDetections.map((item) => item.label))),
     [allDetections]
   );
-  const selectedImage = mission?.images.find((image) => image.id === selectedImageId) ?? mission?.images[0] ?? null;
+  const selectedImage = orderedImages.find((image) => image.id === selectedImageId) ?? orderedImages[0] ?? null;
   const visibleDetections = selectedImage?.detections.filter(
     (item) => item.confidence >= threshold && enabledLabels.includes(item.label) && item.review_status !== "rejected"
   ) ?? [];
@@ -342,7 +360,7 @@ export default function App() {
     try {
       const loaded = await api.getMission(id);
       setMission(loaded);
-      setSelectedImageId(loaded.images[0]?.id ?? "");
+      setSelectedImageId("");
       setEnabledLabels(Array.from(new Set(loaded.images.flatMap((image) => image.detections.map((item) => item.label)))));
       setView(loaded.status === "review" ? "review" : "upload");
       setScreen("workspace");
@@ -374,7 +392,7 @@ export default function App() {
     try {
       const created = await api.createMission(missionName, segment, files, isAdmin ? missionFaena : undefined);
       setMission(created);
-      setSelectedImageId(created.images[0]?.id ?? "");
+      setSelectedImageId("");
       setFiles([]);
       void refreshMissions();
     } catch (requestError) {
@@ -386,10 +404,14 @@ export default function App() {
 
   async function runDetection() {
     if (!mission) return;
+    const startedAt = performance.now();
     setBusy("detect");
     setError("");
+    setElapsed(0);
+    setDetectionStart({ missionId: mission.id, timestamp: startedAt });
     try {
       const processed = await api.detect(mission.id);
+      setDetectionTime({ missionId: mission.id, milliseconds: performance.now() - startedAt });
       setMission(processed);
       setEnabledLabels(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label)))));
       setView("review");
@@ -397,6 +419,7 @@ export default function App() {
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "La detección no pudo completarse.");
     } finally {
+      setDetectionStart(null);
       setBusy(null);
     }
   }
@@ -454,10 +477,10 @@ export default function App() {
   }
 
   function selectRelative(direction: -1 | 1) {
-    if (!mission?.images.length || !selectedImage) return;
-    const currentIndex = mission.images.findIndex((image) => image.id === selectedImage.id);
-    const nextIndex = (currentIndex + direction + mission.images.length) % mission.images.length;
-    setSelectedImageId(mission.images[nextIndex].id);
+    if (!selectedImage) return;
+    const currentIndex = orderedImages.findIndex((image) => image.id === selectedImage.id);
+    const nextIndex = (currentIndex + direction + orderedImages.length) % orderedImages.length;
+    setSelectedImageId(orderedImages[nextIndex].id);
   }
 
   async function setImageCriticality(image: MissionImage, level: ManualCriticality) {
@@ -882,6 +905,16 @@ export default function App() {
           {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
           {health?.detector === "mock" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
 
+          {mission && (
+            <div role="status">
+              {detectionStart?.missionId === mission.id ? (
+                <p className="inference-duration"><Clock size={15} /> Tiempo transcurrido · {formatDuration(elapsed)}</p>
+              ) : detectionTime?.missionId === mission.id && (
+                <p className="inference-duration"><Clock size={15} /> Procesamiento de la misión · {formatDuration(detectionTime.milliseconds)}</p>
+              )}
+            </div>
+          )}
+
           {view === "upload" && (
             <section className={`workspace upload-layout fade-in-view ${mission ? "has-mission" : ""}`}>
               <form className="card upload-card" onSubmit={createMission}>
@@ -968,13 +1001,28 @@ export default function App() {
                 <div className="card viewer-card">
                   <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><div className="image-meta-actions">{(selectedImage.road_width_url || selectedImage.analysis_url) && <div className="view-switch" role="group" aria-label="Vista de la imagen">{imageViewOptions.map((option) => <button key={option.value} type="button" className={imageView === option.value ? "active" : ""} onClick={() => setImageView(option.value)}>{option.label}</button>)}</div>}{selectedImage.road_width && <span className={`width-badge ${widthClass(selectedImage.road_width.estado)}`} title="Ancho de pista (percentil 10)"><Ruler size={13} />{selectedImage.road_width.confianza_pista != null ? `${selectedImage.road_width.clase_pista ?? "Pista"} ${confidence(selectedImage.road_width.confianza_pista)} · ` : ""}{selectedImage.road_width.ancho_min_m != null ? `${selectedImage.road_width.ancho_min_m.toFixed(1).replace(".", ",")} m` : "—"} · {selectedImage.road_width.estado}</span>}<span className="pill">{visibleDetections.length} hallazgos</span></div></div>
                   <div className="image-stage">
-                    <img src={api.imageUrl(imageView !== "rocas" ? (selectedImage.road_width_url ?? selectedImage.analysis_url ?? selectedImage.image_url) : selectedImage.image_url)} alt="Camino minero bajo revisión" />
+                    <img width={selectedImage.width} height={selectedImage.height} src={api.imageUrl(imageView !== "rocas" ? (selectedImage.road_width_url ?? selectedImage.analysis_url ?? selectedImage.image_url) : selectedImage.image_url)} alt="Camino minero bajo revisión" />
                     {imageView !== "segmentacion" && visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
                     <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
                   </div>
-                  <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{mission.images.findIndex((image) => image.id === selectedImage.id) + 1} / {mission.images.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
+                  <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{orderedImages.findIndex((image) => image.id === selectedImage.id) + 1} / {orderedImages.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
                 </div>
-                <div className="thumbnail-row">{mission.images.map((image) => <button key={image.id} className={image.id === selectedImage.id ? "selected" : ""} onClick={() => setSelectedImageId(image.id)}><img src={api.imageUrl(image.image_url)} alt="Miniatura" /><span>{image.detections.length}</span>{image.criticidad_manual && <i className={`thumb-crit-dot ${image.criticidad_manual}`} title={criticalityLabel[image.criticidad_manual]} />}</button>)}</div>
+                <section className="card mission-gallery" aria-labelledby="mission-gallery-title">
+                  <div className="card-title compact">
+                    <h2 id="mission-gallery-title">Imágenes de la misión</h2>
+                    <span className="pill">{orderedImages.length}</span>
+                  </div>
+                  <div className="mission-gallery-grid">
+                    {orderedImages.map((image, index) => (
+                      <button key={image.id} type="button" aria-pressed={image.id === selectedImage.id}
+                        onClick={() => setSelectedImageId(image.id)} title={image.filename}>
+                        <img loading="lazy" src={api.imageUrl(image.analysis_url ?? image.road_width_url ?? image.image_url)} alt="" />
+                        <strong>{index + 1}. {image.filename}</strong>
+                        <small>{image.detections.length} {image.detections.length === 1 ? "hallazgo" : "hallazgos"}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
               </div>
 
               <aside className="card review-card">

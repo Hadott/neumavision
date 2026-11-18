@@ -127,8 +127,8 @@ button { color: inherit; }
 .image-meta > div > span { display: grid; gap: 2px; min-width: 0; }
 .image-meta strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
 .image-meta small { color: var(--muted); font-size: 8px; }
-.image-stage { position: relative; aspect-ratio: 12 / 7; overflow: hidden; background: #24303a; }
-.image-stage > img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.image-stage { position: relative; overflow: hidden; background: #24303a; }
+.image-stage > img { width: 100%; height: auto; display: block; }
 .box { position: absolute; border: 2px solid; padding: 0; background: transparent; cursor: default; box-shadow: 0 0 0 1px rgba(0,0,0,.16); transition: .16s ease; }
 .box:hover { z-index: 5; outline: 2px solid rgba(255,255,255,.7); }
 .box > span { position: absolute; top: -22px; left: -2px; min-height: 20px; padding: 0 6px; display: flex; align-items: center; color: #20160f; white-space: nowrap; font-size: 7px; font-weight: 850; }
@@ -235,7 +235,6 @@ footer span:last-child { display: flex; align-items: center; gap: 5px; }
   .architecture > svg { display: none; }
   .form-actions { flex-direction: column; }
   .dropzone { min-height: 210px; }
-  .image-stage { min-height: 245px; }
   .box > span { top: -19px; min-height: 17px; font-size: 6px; }
   .bar-list > div { grid-template-columns: 78px 1fr 18px; }
   footer { flex-direction: column; gap: 6px; }
@@ -732,3 +731,12 @@ footer span:last-child { display: flex; align-items: center; gap: 5px; }
 .view-switch button { border: 0; background: transparent; color: #5f6b74; border-radius: 99px; padding: 4px 9px; font-size: 9px; font-weight: 760; cursor: pointer; white-space: nowrap; }
 .view-switch button:hover { color: #1f2a30; }
 .view-switch button.active { background: #fff; color: #1f2a30; box-shadow: 0 1px 3px rgba(0,0,0,.14); }
+
+.inference-duration { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .85rem; }
+.mission-gallery { margin-top: 12px; }
+.mission-gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 8px; padding: 0 11px 11px; }
+.mission-gallery-grid button { min-width: 0; display: grid; gap: 5px; padding: 5px; border: 2px solid var(--line); border-radius: 8px; background: white; color: inherit; text-align: left; cursor: pointer; }
+.mission-gallery-grid button[aria-pressed="true"] { border-color: var(--orange); }
+.mission-gallery-grid img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 4px; }
+.mission-gallery-grid strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; }
+.mission-gallery-grid small { color: var(--muted); font-size: .7rem; }
