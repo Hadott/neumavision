@@ -511,19 +511,17 @@ el 13 de noviembre de 2026. Este mapa corresponde al dataset; aplica a los pesos
 entrenados con esas categorías sin remapeo de IDs. No asumir que aplica a futuros
 checkpoints de otro dataset.
 
-La prueba local de segmentación usa `RFDETRSegMedium` y los pesos locales
-`inference/models/weights_seg.pt`. El checkpoint inspeccionado no incluye nombres
-de clases (`args.class_names = None`). `inference/segmentation.py` conserva los
-candidatos con umbral 0 y guarda únicamente la máscara con mayor confianza entre
-ambas clases, incluso si su confianza es inferior a 0,40. Las salidas actuales
-son `inference/outputs/road_mask.png` y `road_overlay.jpg`, y se sobrescriben en
-cada ejecución. Esta prueba no sustituye la arquitectura YOLO del MVP documentada
-arriba.
+La segmentación usa YOLO26 con el checkpoint entrenado para caminos
+`inference/models/weights_seg.pt`. El servicio identifica las clases por nombre
+y conserva los IDs del visor: 1 para Camino y 2 para Camino Rocoso.
+Selecciona la máscara de mayor confianza con umbral 0 y la devuelve a la
+resolución original. La prueba local guarda `road_mask.png` y
+`road_overlay.jpg` en `inference/outputs/`.
 
 ## Prueba local del detector de rocas
 
 `inference/detection.py` permite probar el detector YOLO26l con el checkpoint
-`inference/models/weights_det.pt`, separado de `weights_seg.pt` (RF-DETR).
+`inference/models/weights_det.pt`, separado de `weights_seg.pt` (YOLO26 de segmentación).
 Recibe una imagen, confianza configurable (0,30 por defecto), resolución de
 inferencia y dispositivo. Guarda cajas en píxeles en JSON y una imagen anotada.
 Usa grilla 2×3 sin solapamiento (tiles 1280×1080 para fotos 3840×2160), letterbox
@@ -535,7 +533,7 @@ el archivo de detección sea el checkpoint YOLO correcto: durante la revisión d
 
 ## Cruce local de segmentación y detección
 
-`inference/pipeline.py` ejecuta RF-DETR sobre la foto completa y YOLO por tiles,
+`inference/pipeline.py` ejecuta YOLO26 de segmentación sobre la foto completa y YOLO26 de detección por tiles,
 reutilizando la selección de máscara de mayor confianza en `segmentation.py`.
 `postprocessing.py` conserva todos los hallazgos y marca alarma si la caja de
 una roca intersecta al menos un píxel de esa máscara. No es una intersección
@@ -546,7 +544,7 @@ imagen combinada y JSON locales; no cambia API, base de datos ni notificaciones.
 ## 15. Estado actual
 
 La plataforma dispone del modo `DETECTOR_MODE=remote`: el backend llama por HTTP
-a `inference/api.py`, que ejecuta RF-DETR y YOLO con el pipeline validado. Solo
+a `inference/api.py`, que ejecuta ambos modelos YOLO26 con el pipeline de inferencia. Solo
 las rocas cuya caja intersecta la máscara se persisten en DETECCION; las rocas
 fuera del camino son candidatos de diagnóstico. No se crean nuevas entidades.
 La ausencia de máscara es un error de cruce, no un resultado sin hallazgos.
@@ -556,8 +554,7 @@ sirven con autorización por faena. La inferencia no accede a RDS ni S3. Nina pu
 en un bucket privado y registrar sus claves en RDS. Los originales siguen
 almacenados localmente en Nina.
 
-Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga RF-DETR
-y YOLO al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
+Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga ambos modelos YOLO26 al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
 Un único proceso de Nina coordina los trabajos y solicita apagar Jade cuando
 termina el último. Variables, permisos y despliegue en `inference/README.md`.
 

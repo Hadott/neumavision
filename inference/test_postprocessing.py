@@ -1,10 +1,11 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from postprocessing import cross_detections
-from segmentation import select_road_mask
+from segmentation import predict_road
 
 
 class CrossingTests(unittest.TestCase):
@@ -28,19 +29,40 @@ class CrossingTests(unittest.TestCase):
         self.assertIsNone(result[0]["road_overlap_pixels"])
         self.assertEqual(cross_detections([], mask, True), [])
 
-    def test_selects_highest_confidence_even_below_point_four(self):
-        detections = SimpleNamespace(
-            mask=np.array([[[1, 0], [0, 0]], [[0, 0], [0, 1]]], dtype=bool),
-            confidence=np.array([0.1, 0.3]), class_id=np.array([1, 2]))
-        mask, selected = select_road_mask(detections, 4, 4)
-        self.assertEqual(selected, {"confidence": 0.3, "class_id": 2})
-        self.assertEqual(int(mask[:2, :2].sum()), 0)
-        self.assertTrue(np.all(mask[2:, 2:] == 255))
+    @patch("segmentation.load_model")
+    def test_yolo_mask_preserves_road_class_and_confidence(self, load_model):
+        image = np.zeros((4, 6, 3), dtype=np.uint8)
+        model = load_model.return_value
+        model.names = {0: "Camino Rocoso", 1: "Camino", 2: "Otra clase"}
+        pixels = np.zeros((1, 4, 6), dtype=np.uint8)
+        pixels[0, 2:, 3:] = 1
+        result = Mock(masks=[object()])
+        result.cpu.return_value.numpy.return_value = SimpleNamespace(
+            masks=SimpleNamespace(data=pixels),
+            boxes=SimpleNamespace(conf=[0.3], cls=[0]),
+        )
+        model.predict.return_value = [result]
 
-    def test_missing_masks(self):
-        mask, selected = select_road_mask(SimpleNamespace(mask=None), 4, 4)
+        mask, selected = predict_road(image)
+
+        self.assertEqual(selected, {"confidence": 0.3, "class_id": 2})
+        np.testing.assert_array_equal(mask, pixels[0] * 255)
+        self.assertIs(model.predict.call_args.args[0], image)
+        options = model.predict.call_args.kwargs
+        self.assertEqual(options["classes"], [0, 1])
+        self.assertEqual(options["max_det"], 1)
+        self.assertTrue(options["retina_masks"])
+
+    @patch("segmentation.load_model")
+    def test_missing_masks(self, load_model):
+        model = load_model.return_value
+        model.names = {0: "Camino"}
+        model.predict.return_value = [SimpleNamespace(masks=None)]
+
+        mask, selected = predict_road(np.zeros((4, 6, 3), dtype=np.uint8))
+
         self.assertIsNone(selected)
-        self.assertEqual(int(mask.sum()), 0)
+        np.testing.assert_array_equal(mask, np.zeros((4, 6), dtype=np.uint8))
 
 
 if __name__ == "__main__":

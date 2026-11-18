@@ -5,48 +5,62 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import torch
-from rfdetr import RFDETRSegMedium
 
 BASE_DIR = Path(__file__).resolve().parent
 WEIGHTS = BASE_DIR / "models" / "weights_seg.pt"
 INPUT_DIR = BASE_DIR / "test_images"
 OUTPUT_DIR = BASE_DIR / "outputs"
 
-# Conservar todos los candidatos para seleccionar el de mayor confianza.
-CONFIDENCE = 0.0
+# IDs usados por el visor, independientes del orden del dataset YOLO.
+ROAD_CLASSES = {
+    "camino": 1,
+    "camino en buen estado": 1,
+    "camino rocoso": 2,
+    "camino con material pedregoso": 2,
+}
 
 
-def select_road_mask(detections, height: int, width: int):
-    road_mask = np.zeros((height, width), dtype=np.uint8)
-    if detections.mask is None or len(detections.mask) == 0:
-        return road_mask, None
-    best_index = int(np.argmax(detections.confidence))
-    mask = detections.mask[best_index]
-    if mask.shape != (height, width):
-        mask = cv2.resize(mask.astype(np.uint8), (width, height),
-                          interpolation=cv2.INTER_NEAREST)
-    road_mask = mask.astype(np.uint8) * 255
-    return road_mask, {
-        "confidence": float(detections.confidence[best_index]),
-        "class_id": int(detections.class_id[best_index]),
-    }
+def road_class_ids(names: dict[int, str]) -> dict[int, int]:
+    classes = {}
+    for class_id, name in names.items():
+        normalized = " ".join(name.lower().replace("_", " ").replace("-", " ").split())
+        if normalized in ROAD_CLASSES:
+            classes[class_id] = ROAD_CLASSES[normalized]
+    if not classes:
+        raise ValueError(f"El segmentador no contiene clases de camino reconocidas: {names}")
+    return classes
 
 
 @lru_cache(maxsize=1)
 def load_model(weights: Path):
     if not weights.is_file():
         raise FileNotFoundError(f"No se encontraron los pesos: {weights}")
-    print("Cargando RF-DETR...")
-    return RFDETRSegMedium(pretrain_weights=str(weights))
+
+    from ultralytics import YOLO
+
+    model = YOLO(str(weights))
+    if model.task != "segment":
+        raise ValueError(f"Se requiere un checkpoint YOLO de segmentación: {weights}")
+    road_class_ids(model.names)
+    return model
 
 
 def predict_road(image, weights: Path = WEIGHTS):
     model = load_model(weights)
-    print("Ejecutando segmentacion...")
-    detections = model.predict(cv2.cvtColor(image, cv2.COLOR_BGR2RGB),
-                               threshold=CONFIDENCE)
-    return select_road_mask(detections, *image.shape[:2])
+    classes = road_class_ids(model.names)
+    result = model.predict(
+        image, conf=0.0, classes=list(classes), max_det=1,
+        retina_masks=True, verbose=False,
+    )[0]
+    if result.masks is None or len(result.masks) == 0:
+        return np.zeros(image.shape[:2], dtype=np.uint8), None
+
+    result = result.cpu().numpy()
+    road_mask = result.masks.data[0].astype(np.uint8) * 255
+    return road_mask, {
+        "confidence": float(result.boxes.conf[0]),
+        "class_id": classes[int(result.boxes.cls[0])],
+    }
 
 
 def main(image_path: Path | None = None):
@@ -70,6 +84,8 @@ def main(image_path: Path | None = None):
         raise RuntimeError("No se pudo leer la imagen")
 
     height, width = image.shape[:2]
+
+    import torch
 
     print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "No disponible")
     print("Imagen:", image_path.name)

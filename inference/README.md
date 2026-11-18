@@ -9,7 +9,7 @@ Ejecutar desde la raíz del repositorio, con el entorno de inferencia existente:
 ```
 
 Usar el checkpoint YOLO26l de rocas en `inference/models/weights_det.pt`.
-`weights_seg.pt` corresponde a RF-DETR y se conserva sin cambios. El script
+`weights_seg.pt` corresponde al segmentador de caminos YOLO26. El script
 rechaza pesos idénticos al segmentador. Instala Ultralytics para cargar YOLO26:
 https://docs.ultralytics.com/models/yolo26/
 
@@ -38,11 +38,11 @@ prueba con el mismo nombre sobrescribe sus salidas; usar `--output` para compara
 umbrales. Pesos, imágenes y salidas están ignorados por Git.
 
 Esta prueba es independiente del backend. `requirements.txt` agrega únicamente
-el runtime de detección al entorno existente; no instala el segmentador RF-DETR.
+Ultralytics para ejecutar ambos modelos YOLO26.
 
 ## Cruce con la máscara del camino
 
-Con el entorno existente que ya tiene RF-DETR y Ultralytics:
+Con el entorno de inferencia que tiene Ultralytics:
 
 ```powershell
 .\inference\.venv\Scripts\python.exe inference/pipeline.py inference/test_images/1.jpg
@@ -125,7 +125,7 @@ ninguna otra regla asociada a Jade expone ese puerto a Internet. Ver
 
 Copiar el directorio `inference/` de la misma revisión que el backend desplegado
 y colocar los checkpoints confiables en `inference/models/weights_seg.pt`
-(RF-DETR) y `inference/models/weights_det.pt` (YOLO). Confirmar que son archivos
+(YOLO26 de segmentación) y `inference/models/weights_det.pt` (YOLO26 de detección). Confirmar que son archivos
 distintos con `sha256sum inference/models/weights_{seg,det}.pt`.
 
 Desde el checkout, con Python y soporte para entornos virtuales instalados:
