@@ -118,7 +118,11 @@ export default function App() {
   const [busy, setBusy] = useState<Busy>(null);
   const [detectionStart, setDetectionStart] = useState<{ missionId: string; timestamp: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [detectionTime, setDetectionTime] = useState<{ missionId: string; milliseconds: number } | null>(null);
+  const [detectionSummary, setDetectionSummary] = useState<{
+    missionId: string;
+    milliseconds: number;
+    imageCount: number;
+  } | null>(null);
   const [error, setError] = useState("");
   const [threshold, setThreshold] = useState(0.3);
   // Vista de la imagen en Revision; la misma opcion define la imagen de cada ficha del informe.
@@ -373,7 +377,7 @@ export default function App() {
 
   function acceptFiles(incoming: FileList | File[]) {
     const valid = Array.from(incoming).filter((file) => file.type.startsWith("image/"));
-    setFiles((current) => [...current, ...valid].slice(0, 100));
+    setFiles((current) => [...current, ...valid]);
     setError("");
   }
 
@@ -408,10 +412,15 @@ export default function App() {
     setBusy("detect");
     setError("");
     setElapsed(0);
+    setDetectionSummary(null);
     setDetectionStart({ missionId: mission.id, timestamp: startedAt });
     try {
       const processed = await api.detect(mission.id);
-      setDetectionTime({ missionId: mission.id, milliseconds: performance.now() - startedAt });
+      setDetectionSummary({
+        missionId: processed.id,
+        milliseconds: performance.now() - startedAt,
+        imageCount: processed.images.length,
+      });
       setMission(processed);
       setEnabledLabels(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label)))));
       setView("review");
@@ -909,8 +918,14 @@ export default function App() {
             <div role="status">
               {detectionStart?.missionId === mission.id ? (
                 <p className="inference-duration"><Clock size={15} /> Tiempo transcurrido · {formatDuration(elapsed)}</p>
-              ) : detectionTime?.missionId === mission.id && (
-                <p className="inference-duration"><Clock size={15} /> Procesamiento de la misión · {formatDuration(detectionTime.milliseconds)}</p>
+              ) : detectionSummary?.missionId === mission.id && (
+                <p className="inference-duration">
+                  <Clock size={15} />
+                  <span>
+                    {detectionSummary.imageCount} {detectionSummary.imageCount === 1 ? "imagen procesada" : "imágenes procesadas"}
+                    {" en "}{formatDuration(detectionSummary.milliseconds)}
+                  </span>
+                </p>
               )}
             </div>
           )}
@@ -946,7 +961,7 @@ export default function App() {
                     <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => event.target.files && acceptFiles(event.target.files)} />
                     <span className="upload-icon"><Upload size={25} /></span>
                     <strong>Arrastra las imágenes aquí</strong>
-                    <small>JPG, PNG o WebP · hasta 100 archivos por lote</small>
+                    <small>JPG, PNG o WebP</small>
                     <span className="button secondary"><ImagePlus size={15} /> Seleccionar archivos</span>
                   </div>
                   {files.length > 0 && <div className="queued-files">
