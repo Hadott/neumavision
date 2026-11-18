@@ -1,4 +1,5 @@
 import base64
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -68,7 +69,6 @@ def test_remote_off_road_rocks_and_road_width(tmp_path, monkeypatch):
     assert [item.label for item in findings] == ["Rocas", OFF_ROAD_LABEL]
     jpg_path, json_path = width_paths(path)
     assert jpg_path.is_file() and json_path.is_file()
-    import json
     summary = json.loads(json_path.read_text(encoding="utf-8"))
     assert summary["clase_pista"] == "Carpeta pedregosa"
     assert 14 <= summary["ancho_mediano_m"] <= 18  # 160 px x 10 cm/px = 16 m
@@ -78,6 +78,29 @@ def test_remote_off_road_rocks_and_road_width(tmp_path, monkeypatch):
     payload["road_mask_png"] = base64.b64encode(b"no es png").decode()
     assert len(RemoteDetector().predict(path)) == 2
     assert not json_path.exists()
+
+
+def test_remote_saves_width_returned_by_jade(tmp_path, monkeypatch):
+    path = tmp_path / "original.jpg"
+    Image.new("RGB", (100, 80)).save(path)
+    payload = payload_for(path)
+    summary = {"estado": "Moderado", "ancho_mediano_m": 24.5}
+    payload["road_width"] = {"summary": summary, "overlay_jpeg": payload["overlay_jpeg"]}
+    monkeypatch.setattr(settings, "default_gsd_cm_px", 1.2)
+
+    def predict(url, **kwargs):
+        assert kwargs["data"] == {"include_road_width": "true", "default_gsd_cm_px": "1.2"}
+        return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", predict)
+    assert len(RemoteDetector().predict(path)) == 1
+    jpg_path, json_path = width_paths(path)
+    assert jpg_path.read_bytes() == base64.b64decode(payload["overlay_jpeg"])
+    assert json.loads(json_path.read_text(encoding="utf-8")) == summary
+
+    payload["road_width"]["overlay_jpeg"] = "invalido"
+    assert len(RemoteDetector().predict(path)) == 1
+    assert json.loads(json_path.read_text(encoding="utf-8")) == summary
 
 
 @pytest.fixture
@@ -231,3 +254,21 @@ def test_s3_overlay_is_published_only_on_success(isolated_platform, monkeypatch)
     assert client.post("/api/v1/missions/own/detect").status_code == 503
     assert session.get(Imagen, "image").clave_analisis_s3 == "analysis/result.jpg"
     assert client.get(analysis).content == objects["analysis/result.jpg"]
+
+
+def test_half_resolution_preserves_scale_and_overlay_size():
+    import numpy as np
+
+    from app.services.ancho_pista import analizar
+
+    mask = np.zeros((301, 401), dtype=np.uint8)
+    mask[:, 80:320] = 1
+    photo = np.zeros((*mask.shape, 3), dtype=np.uint8)
+    _, original = analizar(photo, mask, 10.0, "configurado")
+    overlay, reduced = analizar(photo, mask, 10.0, "configurado", media_resolucion=True)
+
+    assert overlay.shape == photo.shape
+    assert reduced["gsd_cm_px"] == original["gsd_cm_px"] == 10.0
+    assert reduced["ancho_mediano_m"] == pytest.approx(24.0, abs=0.2)
+    assert reduced["ancho_min_p10_m"] == pytest.approx(original["ancho_min_p10_m"], abs=0.2)
+    assert reduced["estado"] == original["estado"] == "Moderado"

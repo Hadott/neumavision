@@ -123,8 +123,9 @@ ninguna otra regla asociada a Jade expone ese puerto a Internet. Ver
 
 ### Jade
 
-Copiar el directorio `inference/` de la misma revisión que el backend desplegado
-y colocar los checkpoints confiables en `inference/models/weights_seg.pt`
+Desplegar el checkout de la misma revisión que el backend. Jade usa
+`inference/` y comparte el algoritmo de medición en
+`backend/app/services/ancho_pista.py`. Colocar los checkpoints confiables en `inference/models/weights_seg.pt`
 (YOLO26 de segmentación) y `inference/models/weights_det.pt` (YOLO26 de detección). Confirmar que son archivos
 distintos con `sha256sum inference/models/weights_{seg,det}.pt`.
 
@@ -195,6 +196,18 @@ En la configuración de arranque del backend de Nina, definir
 reiniciar su servicio. Desde la plataforma, crear una misión de prueba con una
 foto de camino y pulsar **Ejecutar detección**. Comprobar que se muestra la
 imagen procesada y que se pueden consultar los hallazgos al recargar la misión.
+
+### Ancho de pista
+
+Actualizar Jade primero y luego Nina. En modo remoto, Nina solicita el ancho
+en `POST /predict` con el campo multipart `include_road_width=true`. Puede
+enviar `DEFAULT_GSD_CM_PX` como `default_gsd_cm_px` si falta la escala EXIF.
+Jade devuelve `road_width.summary` y `road_width.overlay_jpeg` cuando logra
+medir el camino. Jade calcula el eje a media resolución y proyecta el resultado
+a la foto original. Con GSD disponible, repite a resolución completa si la
+medición reducida falla o si su percentil 10 queda a menos de un 5 % de un
+umbral de criticidad. Nina guarda el JSON y el JPEG que usa el visor. Los clientes
+anteriores siguen recibiendo la máscara PNG y pueden medir en Nina.
 
 ### Encendido bajo demanda y resultados en S3
 

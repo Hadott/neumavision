@@ -555,6 +555,9 @@ en un bucket privado y registrar sus claves en RDS. Nina también respalda los
 originales en el bucket, usa copias temporales en Nina y guarda el PDF más reciente
 de cada misión con su referencia en RDS.
 
+En modo remoto, Jade calcula también el ancho de pista sobre la máscara
+de segmentación. Nina guarda el resumen y la imagen anotada para el visor.
+
 Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga ambos modelos YOLO26 al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
 Un único proceso de Nina coordina los trabajos y solicita apagar Jade tras
 20 minutos sin trabajos de inferencia. El visor muestra el estado de EC2 y
