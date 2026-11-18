@@ -18,6 +18,7 @@ class InferenceApiTests(unittest.TestCase):
         image = encoded.tobytes()
         def fake_run(source, output, **kwargs):
             (output / "image_alarms.jpg").write_bytes(image)
+            cv2.imwrite(str(output / "image_road_mask.png"), np.full((20, 30), 255, dtype=np.uint8))
             return {"width": 30, "height": 20, "segmentation": {"class_id": 1},
                     "cross_status": "evaluated", "detections": [
                         {"alarm": True, "bbox": [1, 1, 3, 3], "confidence": 0.5},
@@ -30,6 +31,8 @@ class InferenceApiTests(unittest.TestCase):
                 response = client.post("/predict", headers=headers, files={"file": ("a.jpg", image)})
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(len(response.json()["detections"]), 1)
+                self.assertEqual(len(response.json()["off_road_detections"]), 1)
+                self.assertIsNotNone(response.json()["road_mask_png"])
                 self.assertEqual(base64.b64decode(response.json()["overlay_jpeg"]), image)
             with patch.object(api, "run", return_value={"cross_status": "no_road_mask"}):
                 self.assertEqual(client.post("/predict", headers=headers, files={"file": ("a.jpg", image)}).status_code, 422)

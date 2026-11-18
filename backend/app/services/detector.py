@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -13,6 +14,8 @@ import httpx
 from PIL import Image
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,7 +66,19 @@ class RemoteDetector:
                 if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
                         and 0 <= confidence <= 1):
                     raise ValueError("Deteccion invalida")
-                results.append(DetectionResult("Rocas", confidence, x1 / width,
+                results.append(DetectionResult(ROCK_LABEL, confidence, x1 / width,
+                                               y1 / height, (x2-x1) / width,
+                                               (y2-y1) / height))
+            # Rocas fuera de la pista: se muestran en revision como referencia, no son hallazgos.
+            for item in payload.get("off_road_detections", []):
+                if item["alarm"] is not False:
+                    raise ValueError("Roca fuera de pista mal clasificada")
+                x1, y1, x2, y2 = item["bbox"]
+                confidence = float(item["confidence"])
+                if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height
+                        and 0 <= confidence <= 1):
+                    raise ValueError("Deteccion invalida")
+                results.append(DetectionResult(OFF_ROAD_LABEL, confidence, x1 / width,
                                                y1 / height, (x2-x1) / width,
                                                (y2-y1) / height))
             overlay = base64.b64decode(payload["overlay_jpeg"], validate=True)
@@ -72,6 +87,14 @@ class RemoteDetector:
                     raise ValueError("Imagen procesada invalida")
                 rendered.verify()
             (output_path or overlay_path(image_path)).write_bytes(overlay)
+            if payload.get("road_mask_png"):
+                try:
+                    save_remote_road_width(image_path,
+                                           base64.b64decode(payload["road_mask_png"], validate=True),
+                                           payload.get("segmentation"))
+                except (ValueError, OSError):
+                    # Sin ancho la imagen sigue siendo util: se informan las rocas igual.
+                    logger.warning("No se pudo medir el ancho de pista de %s", image_path.name, exc_info=True)
             return results
         except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as error:
             raise DetectorError("No se pudo analizar la imagen con el servicio de inferencia") from error
@@ -156,6 +179,48 @@ def width_paths(image_path: Path) -> tuple[Path, Path]:
     return Path(f"{image_path}.ancho.jpg"), Path(f"{image_path}.ancho.json")
 
 
+def save_road_width(image_path: Path, bgr, mask, road_conf: float | None, road_class: int | None) -> None:
+    """Mide el ancho de pista sobre una mascara limpia (0/1) y guarda junto a la imagen
+    <imagen>.ancho.jpg y <imagen>.ancho.json. Lo usan los modos neumavision y remote."""
+    import cv2
+
+    from app.services import ancho_pista
+
+    h, w = bgr.shape[:2]
+    gsd = ancho_pista.gsd_desde_exif(str(image_path), w)
+    source = "EXIF"
+    if not gsd and settings.default_gsd_cm_px:
+        gsd, source = settings.default_gsd_cm_px, "configurado"
+    if not gsd:
+        source = "sin GSD"
+    overlay, summary = ancho_pista.analizar(bgr, mask, gsd, source, conf_pista=road_conf, clase_pista=road_class)
+    jpg_path, json_path = width_paths(image_path)
+    if not cv2.imwrite(str(jpg_path), overlay, [cv2.IMWRITE_JPEG_QUALITY, 85]):
+        raise OSError("No se pudo guardar el analisis de ancho")
+    json_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+
+
+def save_remote_road_width(image_path: Path, mask_png: bytes, segmentation: dict | None) -> None:
+    """Ancho de pista en modo remote: el servicio de inferencia devuelve la mascara del
+    camino (PNG) y el backend mide el ancho con la misma logica del modo neumavision."""
+    import cv2
+    import numpy as np
+
+    from app.services import ancho_pista
+
+    bgr = cv2.imread(str(image_path))
+    mask = cv2.imdecode(np.frombuffer(mask_png, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if bgr is None or mask is None or mask.shape != bgr.shape[:2]:
+        raise ValueError("Mascara de camino invalida")
+    clean = ancho_pista.limpiar((mask > 0).astype(np.uint8))
+    seg = segmentation or {}
+    conf = seg.get("confidence")
+    clase = seg.get("class_id")
+    save_road_width(image_path, bgr, clean,
+                    float(conf) if conf is not None else None,
+                    int(clase) if clase is not None else None)
+
+
 class NeumaVisionDetector:
     """Pipeline completo de NeumaVision:
 
@@ -230,16 +295,7 @@ class NeumaVisionDetector:
         has_road = bool(mask.any())
 
         # ancho de pista
-        gsd = ancho_pista.gsd_desde_exif(str(image_path), w)
-        source = "EXIF"
-        if not gsd and settings.default_gsd_cm_px:
-            gsd, source = settings.default_gsd_cm_px, "configurado"
-        if not gsd:
-            source = "sin GSD"
-        overlay, summary = ancho_pista.analizar(bgr, mask, gsd, source, conf_pista=road_conf, clase_pista=road_class)
-        overlay_path, json_path = width_paths(image_path)
-        cv2.imwrite(str(overlay_path), overlay, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        json_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+        save_road_width(image_path, bgr, mask, road_conf, road_class)
 
         # rocas filtradas por la pista (margen para bermas/bordes)
         if has_road:

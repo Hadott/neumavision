@@ -60,7 +60,12 @@ def predict(file: UploadFile = File(...), authorization: str | None = Header(def
                 "width": result["width"], "height": result["height"],
                 "segmentation": result["segmentation"],
                 "detections": [item for item in result["detections"] if item["alarm"] is True],
+                # Rocas que no tocan la mascara: el backend las muestra como referencia.
+                "off_road_detections": [item for item in result["detections"] if item["alarm"] is False],
                 "overlay_jpeg": base64.b64encode((root / "image_alarms.jpg").read_bytes()).decode("ascii"),
+                # Mascara del camino (PNG 0/255): el backend mide con ella el ancho de pista.
+                "road_mask_png": (base64.b64encode(mask_file.read_bytes()).decode("ascii")
+                                  if (mask_file := root / "image_road_mask.png").is_file() else None),
             }
         except (OSError, ValueError, RuntimeError) as error:
             logger.exception("Fallo la inferencia")

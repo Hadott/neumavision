@@ -15,7 +15,7 @@ from app.database import get_session
 from app.main import app
 from app.models import Deteccion, Faena, Imagen, Mision
 from app.services.auth import get_current_faena
-from app.services.detector import DetectorError, RemoteDetector, overlay_path
+from app.services.detector import OFF_ROAD_LABEL, DetectorError, RemoteDetector, overlay_path, width_paths
 
 
 def payload_for(path: Path, detections=None):
@@ -45,6 +45,39 @@ def test_remote_conversion_empty_and_invalid_payload(tmp_path, monkeypatch):
     payload["detections"] = [{"alarm": False}]
     with pytest.raises(DetectorError):
         RemoteDetector().predict(path)
+
+
+def test_remote_off_road_rocks_and_road_width(tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+
+    path = tmp_path / "original.jpg"
+    Image.new("RGB", (400, 300), (120, 110, 100)).save(path)
+    mask = np.zeros((300, 400), dtype=np.uint8)
+    mask[:, 120:280] = 255  # pista vertical de 160 px de ancho
+    ok, mask_png = cv2.imencode(".png", mask)
+    assert ok
+    payload = payload_for(path, detections=[{"alarm": True, "bbox": [150, 100, 170, 120], "confidence": 0.6}])
+    payload["off_road_detections"] = [{"alarm": False, "bbox": [10, 10, 30, 30], "confidence": 0.5}]
+    payload["segmentation"] = {"confidence": 0.7, "class_id": 2}
+    payload["road_mask_png"] = base64.b64encode(mask_png.tobytes()).decode()
+    monkeypatch.setattr(settings, "default_gsd_cm_px", 10.0)
+    monkeypatch.setattr(httpx, "post", lambda *a, **kw: httpx.Response(
+        200, json=payload, request=httpx.Request("POST", "http://inference/predict")))
+    findings = RemoteDetector().predict(path)
+    assert [item.label for item in findings] == ["Rocas", OFF_ROAD_LABEL]
+    jpg_path, json_path = width_paths(path)
+    assert jpg_path.is_file() and json_path.is_file()
+    import json
+    summary = json.loads(json_path.read_text(encoding="utf-8"))
+    assert summary["clase_pista"] == "Carpeta pedregosa"
+    assert 14 <= summary["ancho_mediano_m"] <= 18  # 160 px x 10 cm/px = 16 m
+
+    # una mascara invalida no impide reportar las rocas
+    jpg_path.unlink(); json_path.unlink()
+    payload["road_mask_png"] = base64.b64encode(b"no es png").decode()
+    assert len(RemoteDetector().predict(path)) == 2
+    assert not json_path.exists()
 
 
 @pytest.fixture
