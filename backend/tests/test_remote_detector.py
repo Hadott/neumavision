@@ -102,3 +102,35 @@ def test_platform_zero_findings_and_database_failure(isolated_platform, monkeypa
         raise SQLAlchemyError("database unavailable")
     monkeypatch.setattr(session, "commit", failed_commit)
     assert client.post("/api/v1/missions/own/detect").status_code == 503
+
+
+def test_s3_overlay_is_published_only_on_success(isolated_platform, monkeypatch):
+    from app.api import missions
+    from app.services.storage import AnalysisStorageError
+
+    client, session, path = isolated_platform
+    monkeypatch.setattr(settings, "analysis_s3_bucket", "private-test")
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: httpx.Response(
+        200, json=payload_for(path), request=httpx.Request("POST", "http://inference/predict")))
+    objects = {}
+
+    def store(mission_id, image_id, overlay):
+        assert (mission_id, image_id) == ("own", "image")
+        objects["analysis/result.jpg"] = overlay.read_bytes()
+        return "analysis/result.jpg"
+
+    monkeypatch.setattr(missions, "store_analysis", store)
+    monkeypatch.setattr(missions, "read_analysis", objects.__getitem__)
+    assert client.post("/api/v1/missions/own/detect").status_code == 200
+    analysis = "/api/v1/missions/own/images/image?analysis=true"
+    assert session.get(Imagen, "image").clave_analisis_s3 == "analysis/result.jpg"
+    assert client.get(analysis).content == objects["analysis/result.jpg"]
+    assert client.get("/api/v1/missions/other/images/image?analysis=true").status_code == 404
+
+    def unavailable(*args):
+        raise AnalysisStorageError("S3 no disponible")
+
+    monkeypatch.setattr(missions, "store_analysis", unavailable)
+    assert client.post("/api/v1/missions/own/detect").status_code == 503
+    assert session.get(Imagen, "image").clave_analisis_s3 == "analysis/result.jpg"
+    assert client.get(analysis).content == objects["analysis/result.jpg"]

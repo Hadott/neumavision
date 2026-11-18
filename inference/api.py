@@ -4,6 +4,7 @@ import base64
 import logging
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
@@ -11,9 +12,21 @@ from threading import Lock
 import cv2
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 
+from detection import WEIGHTS as ROCK_WEIGHTS, load_rock_model
 from pipeline import run
+from segmentation import WEIGHTS as ROAD_WEIGHTS, load_model as load_road_model
 
-app = FastAPI(title="NeumaVision inference")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if os.environ.get("INFERENCE_PRELOAD") == "1":
+        if not os.environ.get("INFERENCE_TOKEN"):
+            raise RuntimeError("Configura INFERENCE_TOKEN para ejecutar Jade.")
+        load_road_model(ROAD_WEIGHTS)
+        load_rock_model(ROCK_WEIGHTS)
+    yield
+
+
+app = FastAPI(title="NeumaVision inference", lifespan=lifespan)
 model_lock = Lock()
 logger = logging.getLogger(__name__)
 MAX_UPLOAD = 30 * 1024 * 1024

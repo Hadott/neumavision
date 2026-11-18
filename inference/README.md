@@ -103,7 +103,7 @@ situación en cero hallazgos. Un error al guardar resultados devuelve 503.
 La sustitución de detecciones en una misión es transaccional: si falla una
 imagen se conservan las detecciones anteriores. El JPEG derivado se guarda junto
 al original como `<archivo>.vision.jpg`. Actualmente ambos siguen en almacenamiento
-local del backend; la conexión con S3 y el despliegue AWS siguen pendientes.
+local del backend.
 
 Configuración del backend: `DETECTOR_MODE=remote`, `INFERENCE_URL`,
 `INFERENCE_TIMEOUT` (300 segundos por imagen) e `INFERENCE_TOKEN` opcional para
@@ -112,3 +112,114 @@ restringir su puerto al backend y configurar el mismo `INFERENCE_TOKEN` secreto
 en ambos procesos. El servicio lee ese valor del entorno; se puede cargar un
 `.env` local con `uvicorn --env-file` sin versionarlo. No publicar el servicio de
 inferencia directamente al navegador. No se modifican `.env` existentes.
+
+## Despliegue en EC2 con Nina y Jade
+
+Nina ejecuta el backend y Jade ejecuta este servicio. Si ambas instancias
+comparten VPC, usar la IP privada de Jade y permitir entrada TCP 8001 en su
+security group con la IP privada de Nina como origen (`/32`). Comprobar que
+ninguna otra regla asociada a Jade expone ese puerto a Internet. Ver
+[reglas de security groups de AWS](https://docs.aws.amazon.com/vpc/latest/userguide/security-group-rules.html).
+
+### Jade
+
+Copiar el directorio `inference/` de la misma revisión que el backend desplegado
+y colocar los checkpoints confiables en `inference/models/weights_seg.pt`
+(RF-DETR) y `inference/models/weights_det.pt` (YOLO). Confirmar que son archivos
+distintos con `sha256sum inference/models/weights_{seg,det}.pt`.
+
+Desde el checkout, con Python y soporte para entornos virtuales instalados:
+
+```bash
+python3 -m venv inference/.venv
+inference/.venv/bin/python -m pip install -r inference/requirements.txt
+```
+
+Configurar `INFERENCE_TOKEN` en el `.env` local ignorado por Git y restringir
+su lectura al usuario del servicio. Usar una unidad systemd con un único worker.
+Este ejemplo supone un checkout en `/home/ubuntu/neumavision` y el usuario
+`ubuntu`. Ajustar ambas rutas y el usuario al host real.
+
+```ini
+[Unit]
+Description=NeumaVision inference
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/neumavision/inference
+EnvironmentFile=/home/ubuntu/neumavision/inference/.env
+Environment=INFERENCE_PRELOAD=1
+ExecStart=/home/ubuntu/neumavision/inference/.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port 8001 --workers 1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Guardar la unidad como `/etc/systemd/system/neumavision-inference.service`.
+Ejecutar `sudo systemctl daemon-reload` y luego
+`sudo systemctl enable --now neumavision-inference.service`.
+Consultar el arranque con `sudo journalctl -u neumavision-inference -n 50`.
+
+### Nina
+
+Desde Nina, comprobar primero que Jade responde:
+
+```bash
+curl -fsS --connect-timeout 5 http://IP_PRIVADA_JADE:8001/health
+```
+
+Validar también `POST /predict` con el token y una foto real de camino.
+Con `INFERENCE_PRELOAD=1`, `/health` empieza a responder cuando se han
+cargado ambos checkpoints. La predicción comprueba que el pipeline completo
+funciona con el runtime de Jade.
+
+En la configuración de arranque del backend de Nina, definir
+`DETECTOR_MODE=remote`, `INFERENCE_URL=http://IP_PRIVADA_JADE:8001` y el mismo
+`INFERENCE_TOKEN` de Jade. Conservar la configuración existente del backend y
+reiniciar su servicio. Desde la plataforma, crear una misión de prueba con una
+foto de camino y pulsar **Ejecutar detección**. Comprobar que se muestra la
+imagen procesada y que se pueden consultar los hallazgos al recargar la misión.
+
+### Encendido bajo demanda y resultados en S3
+
+Usar una instancia Jade dedicada a la inferencia de Nina. El servicio de Jade
+arranca automáticamente con el sistema operativo. Configurar en Nina:
+
+| Variable | Valor |
+| --- | --- |
+| `DETECTOR_MODE` | `remote` |
+| `INFERENCE_URL` | `http://IP_PRIVADA_JADE:8001` |
+| `INFERENCE_TOKEN` | El mismo secreto de Jade |
+| `JADE_INSTANCE_ID` | ID EC2 de Jade |
+| `JADE_REGION` | Región de Jade (por defecto `us-east-2`) |
+| `JADE_START_TIMEOUT` | Espera máxima del arranque y carga, en segundos (300 por defecto) |
+| `INFERENCE_TIMEOUT` | Tiempo máximo por solicitud de imagen, en segundos (300 por defecto) |
+| `ANALYSIS_S3_BUCKET` | Bucket privado para los JPEG procesados |
+
+El rol de instancia de Nina requiere `ec2:DescribeInstances` sobre `*` y
+`ec2:StartInstances` y `ec2:StopInstances` limitados al ARN de Jade. Para S3
+requiere `s3:PutObject` y `s3:GetObject` sobre
+`arn:aws:s3:::NOMBRE_BUCKET/analysis/*`. Ver [ejemplos de políticas de EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ExamplePolicies_EC2.html).
+
+Instalar los requisitos del backend y aplicar la revisión Alembic
+`20261118_0008` antes de actualizar el servicio. Verificar la URL y
+`SELECT current_database()` antes de migrar RDS. Esta revisión agrega a
+`imagen` la clave S3 opcional del JPEG procesado. Las imágenes originales
+siguen en el almacenamiento local de Nina. El visor recupera los JPEG privados
+a través del backend, después de comprobar el acceso a la misión.
+
+Con `JADE_INSTANCE_ID` configurado, ejecutar Nina con **un único proceso
+y un único worker**. El endpoint de detección sigue siendo síncrono.
+Ajustar el timeout del proxy para cubrir el arranque en frío y la inferencia
+de todas las imágenes de una misión. Nina reintenta si AWS devuelve un error
+de capacidad temporal de EC2. Cuando termina el último trabajo registrado,
+Nina solicita detener Jade. Un error al detenerla se registra en el log de Nina.
+Si Nina cae durante la inferencia, revisar el estado de Jade en EC2.
+
+Para validar en AWS, partir con Jade detenida y ejecutar la detección de una
+misión pequeña. Verificar que Jade pasa a `running`, que el visor carga el JPEG
+y las detecciones tras recargar la página, y que Jade pasa a `stopping` y luego
+a `stopped` cuando ya no hay solicitudes de procesamiento.

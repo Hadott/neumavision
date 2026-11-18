@@ -15,3 +15,4 @@ ultralytics
 rfdetr
 scikit-image
 opencv-python
+boto3>=1.40,<2

@@ -28,6 +28,19 @@ def file_digest(path: Path) -> bytes:
     return digest.digest()
 
 
+@lru_cache(maxsize=1)
+def load_rock_model(weights: Path):
+    if not weights.is_file():
+        raise FileNotFoundError(f"No se encontraron los pesos: {weights}")
+    segmentation_weights = BASE_DIR / "models" / "weights_seg.pt"
+    if segmentation_weights.is_file() and file_digest(weights) == file_digest(segmentation_weights):
+        raise ValueError(
+            "Los pesos de deteccion son identicos a weights_seg.pt. "
+            "Reemplaza weights_det.pt por el checkpoint YOLO de rocas."
+        )
+    return load_model(weights)
+
+
 def tile_bounds(width: int, height: int, rows: int, columns: int):
     """Grilla sin solapamiento; conserva los pixeles de los bordes."""
     if not 1 <= rows <= height or not 1 <= columns <= width:
@@ -43,14 +56,6 @@ def run(image_path: Path, weights: Path, output: Path, confidence: float,
         rows: int = 2, columns: int = 3, max_det: int = 600) -> dict:
     if not image_path.is_file():
         raise FileNotFoundError(f"No se encontro la imagen: {image_path}")
-    if not weights.is_file():
-        raise FileNotFoundError(f"No se encontraron los pesos: {weights}")
-    segmentation_weights = BASE_DIR / "models" / "weights_seg.pt"
-    if segmentation_weights.is_file() and file_digest(weights) == file_digest(segmentation_weights):
-        raise ValueError(
-            "Los pesos de deteccion son identicos a weights_seg.pt. "
-            "Reemplaza weights_det.pt por el checkpoint YOLO de rocas."
-        )
     if not 0 <= confidence <= 1:
         raise ValueError("La confianza debe estar entre 0 y 1.")
     if imgsz <= 0:
@@ -68,7 +73,7 @@ def run(image_path: Path, weights: Path, output: Path, confidence: float,
     if (width, height) != (3840, 2160) and (rows, columns) == (2, 3):
         print(f"Aviso: imagen {width}x{height}; los tiles no seran 1280x1080. "
               "Se conserva la resolucion original antes del letterbox.")
-    model = load_model(weights)
+    model = load_rock_model(weights)
     detections = []
     tiles = []
     overlay = image.copy()

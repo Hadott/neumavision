@@ -1,8 +1,10 @@
 import json
 import shutil
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
@@ -24,10 +26,13 @@ from app.schemas import (
     MissionSummary,
 )
 from app.services.auth import CurrentFaena, is_admin
-from app.services.detector import DetectorError, OFF_ROAD_LABEL, get_detector, overlay_path, width_paths
+from app.services.detector import DetectorError, OFF_ROAD_LABEL, RemoteDetector, get_detector, overlay_path, width_paths
+from app.services.jade import JadeUnavailable, MissionAlreadyRunning, jade
 from app.services.metadata import extract_gps
 from app.services.report import build_report
-from app.services.storage import ALLOWED_CONTENT_TYPES, mission_directory, save_upload
+from app.services.storage import (
+    ALLOWED_CONTENT_TYPES, AnalysisStorageError, mission_directory, read_analysis, save_upload, store_analysis,
+)
 
 
 router = APIRouter(prefix="/missions", tags=["missions"])
@@ -92,7 +97,7 @@ def serialize_image(session: Session, mission_id: str, image: Imagen) -> ImageRe
         longitude=image.longitud,
         image_url=f"/api/v1/missions/{mission_id}/images/{image.id_imagen}",
         analysis_url=(f"/api/v1/missions/{mission_id}/images/{image.id_imagen}?analysis=true"
-                      if overlay_path(Path(image.ruta_almacenada)).is_file() else None),
+                      if image.clave_analisis_s3 or overlay_path(Path(image.ruta_almacenada)).is_file() else None),
         detections=[serialize_detection(item) for item in detections],
         criticidad_manual=image.criticidad_manual,
         road_width=road_width,
@@ -292,29 +297,47 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
     mission = require_mission(session, mission_id, cuenta)
     images = session.exec(select(Imagen).where(Imagen.id_mision == mission.id_mision)).all()
     image_ids = [image.id_imagen for image in images]
+    if not images:
+        raise HTTPException(422, detail="La misión no tiene imágenes.")
+    detector = get_detector()
+    lease = (jade.mission(mission_id)
+             if settings.jade_instance_id and isinstance(detector, RemoteDetector) else nullcontext())
     try:
-        detector = get_detector()
-        predictions = [(image, detector.predict(Path(image.ruta_almacenada))) for image in images]
-        if image_ids:
+        with lease, TemporaryDirectory() as work_dir:
+            predictions = []
+            for image in images:
+                path = Path(image.ruta_almacenada)
+                if isinstance(detector, RemoteDetector) and settings.analysis_s3_bucket:
+                    overlay = Path(work_dir) / f"{image.id_imagen}.jpg"
+                    findings = detector.predict(path, output_path=overlay)
+                    image.clave_analisis_s3 = store_analysis(mission_id, image.id_imagen, overlay)
+                else:
+                    findings = detector.predict(path)
+                predictions.append((image, findings))
             session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
-        for image, findings in predictions:
-            for prediction in findings:
-                session.add(
-                    Deteccion(
-                        id_imagen=image.id_imagen,
-                        clase=prediction.label,
-                        confianza=prediction.confidence,
-                        bbox_x=prediction.x,
-                        bbox_y=prediction.y,
-                        bbox_ancho=prediction.width,
-                        bbox_alto=prediction.height,
+            for image, findings in predictions:
+                for prediction in findings:
+                    session.add(
+                        Deteccion(
+                            id_imagen=image.id_imagen,
+                            clase=prediction.label,
+                            confianza=prediction.confidence,
+                            bbox_x=prediction.x,
+                            bbox_y=prediction.y,
+                            bbox_ancho=prediction.width,
+                            bbox_alto=prediction.height,
+                        )
                     )
-                )
-            image.estado_proceso = "completed"
-            session.add(image)
-        mission.estado = "review"
-        session.add(mission)
-        session.commit()
+                image.estado_proceso = "completed"
+                session.add(image)
+            mission.estado = "review"
+            session.add(mission)
+            session.commit()
+    except MissionAlreadyRunning as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except (JadeUnavailable, AnalysisStorageError) as error:
+        session.rollback()
+        raise HTTPException(503, detail=str(error)) from error
     except DetectorError as error:
         session.rollback()
         raise HTTPException(502, detail=str(error)) from error
@@ -402,11 +425,16 @@ def update_image_criticality(
 
 @router.get("/{mission_id}/images/{image_id}")
 def get_image(mission_id: str, image_id: str, cuenta: CurrentFaena,
-              analysis: bool = False, session: Session = Depends(get_session)) -> FileResponse:
+              analysis: bool = False, session: Session = Depends(get_session)) -> Response:
     require_mission(session, mission_id, cuenta)
     image = session.get(Imagen, image_id)
     if not image or image.id_mision != mission_id:
         raise HTTPException(status_code=404, detail="Image not found")
+    if analysis and image.clave_analisis_s3:
+        try:
+            return Response(read_analysis(image.clave_analisis_s3), media_type="image/jpeg")
+        except AnalysisStorageError as error:
+            raise HTTPException(503, detail=str(error)) from error
     path = overlay_path(Path(image.ruta_almacenada)) if analysis else Path(image.ruta_almacenada)
     if not path.is_file():
         raise HTTPException(404, detail="Image not found")

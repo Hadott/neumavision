@@ -38,7 +38,7 @@ def overlay_path(image_path: Path) -> Path:
 
 
 class RemoteDetector:
-    def predict(self, image_path: Path) -> list[DetectionResult]:
+    def predict(self, image_path: Path, *, output_path: Path | None = None) -> list[DetectionResult]:
         try:
             headers = ({"Authorization": f"Bearer {settings.inference_token}"}
                        if settings.inference_token else {})
@@ -71,7 +71,7 @@ class RemoteDetector:
                 if rendered.size != (width, height) or rendered.format != "JPEG":
                     raise ValueError("Imagen procesada invalida")
                 rendered.verify()
-            overlay_path(image_path).write_bytes(overlay)
+            (output_path or overlay_path(image_path)).write_bytes(overlay)
             return results
         except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as error:
             raise DetectorError("No se pudo analizar la imagen con el servicio de inferencia") from error

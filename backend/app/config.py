@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     inference_url: str = "http://127.0.0.1:8001"
     inference_token: str = ""
     inference_timeout: float = Field(default=300, gt=0)
+    jade_instance_id: str = Field(default="", pattern=r"^(?:i-[0-9a-f]{8}(?:[0-9a-f]{9})?)?$")
+    jade_region: str = "us-east-2"
+    jade_start_timeout: float = Field(default=300, gt=0)
+    analysis_s3_bucket: str = ""
     # DETECTOR_MODE=neumavision: rocas (YOLO26) + pista (RF-DETR Seg) + ancho de pista
     rock_model_path: Path = Path("./models/rocas.pt")
     road_model_path: Path = Path("./models/pista.pt")

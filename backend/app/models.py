@@ -58,6 +58,7 @@ class Imagen(SQLModel, table=True):
     estado_proceso: str = Field(
         default="pending", sa_column=Column("estado_proceso", String(30), nullable=False, index=True)
     )
+    clave_analisis_s3: str | None = Field(default=None, max_length=1024)
     # Clasificacion de criticidad asignada manualmente por el revisor durante la revision
     # (critico / moderado / optimo). Es independiente de la criticidad automatica por
     # confianza que se usa en el Dashboard.

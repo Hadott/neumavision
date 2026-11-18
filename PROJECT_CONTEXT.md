@@ -552,9 +552,14 @@ fuera del camino son candidatos de diagnóstico. No se crean nuevas entidades.
 La ausencia de máscara es un error de cruce, no un resultado sin hallazgos.
 El visor muestra la máscara verde (clase 1) o naranja (clase 2) con etiqueta sin
 confianza y las cajas interactivas de los hallazgos. Las imágenes derivadas se
-sirven con autorización por faena. La inferencia no accede a RDS ni S3; los
-archivos continúan locales hasta implementar S3. Variables y arranque en
-`inference/README.md`. La activación se hace por entorno sin sobrescribir `.env`.
+sirven con autorización por faena. La inferencia no accede a RDS ni S3. Nina puede guardar los JPEG procesados
+en un bucket privado y registrar sus claves en RDS. Los originales siguen
+almacenados localmente en Nina.
+
+Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga RF-DETR
+y YOLO al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
+Un único proceso de Nina coordina los trabajos y solicita apagar Jade cuando
+termina el último. Variables, permisos y despliegue en `inference/README.md`.
 
 Actualmente:
 
