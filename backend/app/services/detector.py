@@ -45,11 +45,14 @@ class RemoteDetector:
         try:
             headers = ({"Authorization": f"Bearer {settings.inference_token}"}
                        if settings.inference_token else {})
+            form = {"include_road_width": "true"}
+            if settings.default_gsd_cm_px:
+                form["default_gsd_cm_px"] = str(settings.default_gsd_cm_px)
             with image_path.open("rb") as stream:
                 response = httpx.post(
                     settings.inference_url.rstrip("/") + "/predict",
                     files={"file": (image_path.name, stream, "application/octet-stream")},
-                    headers=headers, timeout=settings.inference_timeout,
+                    data=form, headers=headers, timeout=settings.inference_timeout,
                 )
             response.raise_for_status()
             payload = response.json()
@@ -87,7 +90,23 @@ class RemoteDetector:
                     raise ValueError("Imagen procesada invalida")
                 rendered.verify()
             (output_path or overlay_path(image_path)).write_bytes(overlay)
-            if payload.get("road_mask_png"):
+            if payload.get("road_width"):
+                try:
+                    width_result = payload["road_width"]
+                    width_jpeg = base64.b64decode(width_result["overlay_jpeg"], validate=True)
+                    with Image.open(BytesIO(width_jpeg)) as rendered:
+                        if rendered.size != (width, height) or rendered.format != "JPEG":
+                            raise ValueError("Imagen de ancho invalida")
+                        rendered.verify()
+                    summary = width_result["summary"]
+                    if not isinstance(summary, dict):
+                        raise ValueError("Resumen de ancho invalido")
+                    jpg_path, json_path = width_paths(image_path)
+                    jpg_path.write_bytes(width_jpeg)
+                    json_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+                except (ValueError, OSError, KeyError, TypeError):
+                    logger.warning("No se pudo guardar el ancho de pista de %s", image_path.name, exc_info=True)
+            elif payload.get("road_mask_png"):
                 try:
                     save_remote_road_width(image_path,
                                            base64.b64decode(payload["road_mask_png"], validate=True),
@@ -186,14 +205,9 @@ def save_road_width(image_path: Path, bgr, mask, road_conf: float | None, road_c
 
     from app.services import ancho_pista
 
-    h, w = bgr.shape[:2]
-    gsd = ancho_pista.gsd_desde_exif(str(image_path), w)
-    source = "EXIF"
-    if not gsd and settings.default_gsd_cm_px:
-        gsd, source = settings.default_gsd_cm_px, "configurado"
-    if not gsd:
-        source = "sin GSD"
-    overlay, summary = ancho_pista.analizar(bgr, mask, gsd, source, conf_pista=road_conf, clase_pista=road_class)
+    overlay, summary = ancho_pista.analizar_archivo(
+        image_path, bgr, mask, settings.default_gsd_cm_px, road_conf, road_class,
+    )
     jpg_path, json_path = width_paths(image_path)
     if not cv2.imwrite(str(jpg_path), overlay, [cv2.IMWRITE_JPEG_QUALITY, 85]):
         raise OSError("No se pudo guardar el analisis de ancho")
@@ -201,8 +215,7 @@ def save_road_width(image_path: Path, bgr, mask, road_conf: float | None, road_c
 
 
 def save_remote_road_width(image_path: Path, mask_png: bytes, segmentation: dict | None) -> None:
-    """Ancho de pista en modo remote: el servicio de inferencia devuelve la mascara del
-    camino (PNG) y el backend mide el ancho con la misma logica del modo neumavision."""
+    """Compatibilidad con versiones de Jade que solo devuelven la máscara PNG."""
     import cv2
     import numpy as np
 

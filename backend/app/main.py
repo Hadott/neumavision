@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import ensure_development_faena, initialize_database
 from app.schemas import HealthRead, InferenceHealthRead
 from app.services.auth import CurrentFaena
-from app.services.jade import IDLE_CHECK_SECONDS, IDLE_TIMEOUT_SECONDS, jade
+from app.services.jade import IDLE_CHECK_SECONDS, jade
 
 
 async def monitor_jade(stop: asyncio.Event) -> None:
@@ -30,7 +30,7 @@ async def lifespan(_: FastAPI):
     ensure_development_faena()
     stop = asyncio.Event()
     monitor = None
-    if settings.detector_mode == "remote" and settings.jade_instance_id:
+    if settings.detector_mode == "remote" and settings.jade_instance_id and settings.jade_idle_timeout_seconds:
         monitor = asyncio.create_task(monitor_jade(stop))
     try:
         yield
@@ -64,7 +64,7 @@ def health() -> HealthRead:
 def inference_health(cuenta: CurrentFaena) -> InferenceHealthRead:
     managed = settings.detector_mode == "remote" and bool(settings.jade_instance_id)
     return InferenceHealthRead(
-        status=jade.status(), idle_timeout_seconds=IDLE_TIMEOUT_SECONDS if managed else None,
+        status=jade.status(), idle_timeout_seconds=settings.jade_idle_timeout_seconds if managed else None,
     )
 
 

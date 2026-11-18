@@ -142,7 +142,7 @@ def eje_principal(sk):
     return ys[camino], xs[camino]
 
 
-def medir(m):
+def medir(m, escala_px=1):
     """Eje central ordenado, radio (px), validez y normal de cada punto.
     La mascara se extiende fuera de la foto (relleno replicado) para que el eje
     llegue hasta los bordes cuando la pista sale del encuadre."""
@@ -158,7 +158,7 @@ def medir(m):
         z = np.zeros(0)
         return z.astype(int), z.astype(int), z, z.astype(bool), np.zeros((0, 2))
     # direccion local del eje (diferencia entre puntos +-k a lo largo del camino)
-    k = np.clip((1.2 * r).astype(int), 20, None)  # ventana amplia: direccion estable
+    k = np.clip((1.2 * r).astype(int), max(1, 20 // escala_px), None)  # ventana amplia: direccion estable
     i = np.arange(N)
     a, b = np.clip(i - k, 0, N - 1), np.clip(i + k, 0, N - 1)
     d = np.stack([xs[b] - xs[a], ys[b] - ys[a]], 1).astype(float)
@@ -297,10 +297,37 @@ def procesar(modelo, ruta, gsd_forzado, umbral, salida, separacion_m=1.0):
     return dict(foto=os.path.basename(ruta), **res)
 
 
-def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista=None):
+def analizar_archivo(ruta, bgr, mascara, gsd_configurado, conf_pista=None, clase_pista=None, *, media_resolucion=False):
+    gsd_exif = gsd_desde_exif(str(ruta), bgr.shape[1])
+    fuente = "EXIF" if gsd_exif else ("configurado" if gsd_configurado else "sin GSD")
+    gsd = gsd_exif or gsd_configurado
+    args = (bgr, mascara, gsd, fuente)
+    datos_pista = {"conf_pista": conf_pista, "clase_pista": clase_pista}
+    overlay, resumen = analizar(*args, **datos_pista, media_resolucion=media_resolucion)
+    if media_resolucion and gsd:
+        p10 = resumen["ancho_min_p10_m"]
+        umbrales = (F_CRITICO * ANCHO_CAMION_M, F_OPTIMO * ANCHO_CAMION_M)
+        if p10 == "" or any(abs(p10 - umbral) <= umbral * 0.05 for umbral in umbrales):
+            return analizar(*args, **datos_pista)
+    return overlay, resumen
+
+
+def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista=None, *, media_resolucion=False):
     """Mide el ancho sobre una mascara de pista ya limpia. Devuelve (imagen anotada, resumen)."""
     h, w = bgr.shape[:2]
-    ys, xs, r, val, nor = medir(m)
+    escala_px = 2 if media_resolucion and min(h, w) >= 2 else 1
+    mascara_medicion = m
+    if escala_px == 2:
+        # Completa las dimensiones impares para que cada píxel reducido represente 2 × 2.
+        mascara_par = cv2.copyMakeBorder(m, 0, h % 2, 0, w % 2, cv2.BORDER_REPLICATE)
+        mascara_medicion = (cv2.resize(mascara_par.astype(np.float32), ((w + 1) // 2, (h + 1) // 2),
+                                       interpolation=cv2.INTER_AREA) >= 0.5).astype(np.uint8)
+    ys, xs, r, val, nor = medir(mascara_medicion, escala_px)
+    # Proyecta los centros y radios al sistema original, que conserva su GSD.
+    if escala_px == 2:
+        ys, xs = ys * 2 + 0.5, xs * 2 + 0.5
+        r *= 2
+        val &= (ys < h) & (xs < w)
 
     vis = bgr.copy()
     capa = vis.copy()
@@ -315,7 +342,7 @@ def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista
     # eje central (linea fina, coloreada por tramo)
     g_eje = max(4, w // 500)
     for i in range(1, len(ys)):
-        if abs(int(xs[i]) - int(xs[i-1])) <= 2 and abs(int(ys[i]) - int(ys[i-1])) <= 2:
+        if abs(int(xs[i]) - int(xs[i-1])) <= 2 * escala_px and abs(int(ys[i]) - int(ys[i-1])) <= 2 * escala_px:
             cv2.line(vis, (int(xs[i-1]), int(ys[i-1])), (int(xs[i]), int(ys[i])), colores[i], g_eje)
 
     etiquetas = []
@@ -325,7 +352,7 @@ def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista
         paso = np.hypot(np.diff(xs), np.diff(ys))
         s_arc = np.concatenate([[0], np.cumsum(paso)])
         # radio suavizado a lo largo del eje para que las lineas no "salten"
-        k = 15
+        k = 15 // escala_px
         r_suave = np.array([np.median(r[max(0, i-k):i+k+1]) for i in range(len(r))])
         g_tr = max(4, w // 450)
         n_linea = 0

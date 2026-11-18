@@ -149,6 +149,45 @@ def test_detection_progress_counts_finished_images(isolated_platform, monkeypatc
     assert client.get(progress_url).json() is None
 
 
+def test_originals_and_reports_use_private_bucket(isolated_platform, monkeypatch):
+    from app.models import Informe
+    from app.services import storage
+
+    client, session, path = isolated_platform
+    monkeypatch.setattr(settings, "analysis_s3_bucket", "private-test")
+    objects = {}
+
+    class Bucket:
+        def put_object(self, *, Bucket, Key, Body, ContentType):
+            assert Bucket == "private-test"
+            objects[Key] = Body if isinstance(Body, bytes) else Body.read()
+
+        def get_object(self, *, Bucket, Key):
+            return {"Body": BytesIO(objects[Key])}
+
+    monkeypatch.setattr(storage, "analysis_s3", Bucket)
+    response = client.post(
+        "/api/v1/missions", data={"name": "Respaldo"},
+        files={"files": ("original.jpg", path.read_bytes(), "image/jpeg")},
+    )
+    assert response.status_code == 201
+    mission = response.json()
+    image = session.get(Imagen, mission["images"][0]["id"])
+    original = Path(image.ruta_almacenada)
+    key = storage.original_key(mission["id"], original)
+    assert objects[key] == path.read_bytes()
+    assert not original.exists()
+    assert client.get(mission["images"][0]["image_url"]).content == objects[key]
+    with storage.use_original(mission["id"], original):
+        assert original.read_bytes() == objects[key]
+    assert not original.exists()
+    report = client.get(f'/api/v1/missions/{mission["id"]}/report')
+    assert report.status_code == 200
+    assert report.content.startswith(b"%PDF")
+    stored = session.exec(select(Informe)).one()
+    assert objects[stored.clave_objeto_s3] == report.content
+
+
 def test_platform_zero_findings_and_database_failure(isolated_platform, monkeypatch):
     client, session, path = isolated_platform
     monkeypatch.setattr(httpx, "post", lambda *a, **kw: httpx.Response(

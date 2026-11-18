@@ -14,6 +14,7 @@ def manager(monkeypatch):
     manager.ec2 = Mock()
     monkeypatch.setattr(settings, "jade_instance_id", "i-0123456789abcdef0")
     monkeypatch.setattr(settings, "detector_mode", "remote")
+    monkeypatch.setattr(settings, "jade_idle_timeout_seconds", 1200)
     monkeypatch.setattr(lifecycle, "sleep", lambda _: None)
     return manager
 
@@ -89,6 +90,14 @@ def test_active_mission_resets_idle_window(manager, monkeypatch):
     assert manager.idle_since == 1300
     clock.return_value = 2499
     manager.stop_if_idle()
+    manager.ec2.stop_instances.assert_not_called()
+
+
+def test_idle_shutdown_can_be_disabled(manager, monkeypatch):
+    monkeypatch.setattr(settings, "jade_idle_timeout_seconds", 0)
+    manager.idle_since = 0
+    manager.stop_if_idle()
+    manager.ec2.describe_instances.assert_not_called()
     manager.ec2.stop_instances.assert_not_called()
 
 

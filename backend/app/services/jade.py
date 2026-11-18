@@ -16,7 +16,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 CAPACITY_ERRORS = {"InsufficientInstanceCapacity", "InsufficientHostCapacity"}
-IDLE_TIMEOUT_SECONDS = 20 * 60
 IDLE_CHECK_SECONDS = 15
 
 
@@ -75,6 +74,9 @@ class Jade:
         }.get(state, "unknown")
 
     def stop_if_idle(self) -> None:
+        timeout = settings.jade_idle_timeout_seconds
+        if timeout == 0:
+            return
         with self.lock:
             if self.missions:
                 return
@@ -86,7 +88,7 @@ class Jade:
                 now = monotonic()
                 if self.idle_since is None:
                     self.idle_since = now
-                if state == "running" and now - self.idle_since >= IDLE_TIMEOUT_SECONDS:
+                if state == "running" and now - self.idle_since >= timeout:
                     self.ec2.stop_instances(InstanceIds=[settings.jade_instance_id])
                     self.stop_requested = True
                     self.idle_since = None

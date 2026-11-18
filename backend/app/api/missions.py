@@ -1,6 +1,6 @@
 import json
 import shutil
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -13,10 +13,11 @@ from fastapi.responses import FileResponse, Response
 from PIL import Image, ImageDraw
 from sqlmodel import Session, delete, select
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.database import get_session
-from app.models import Deteccion, Faena, Imagen, Mision
+from app.models import Deteccion, Faena, Imagen, Informe, Mision
 from app.schemas import (
     DetectionRead,
     DetectionProgressRead,
@@ -34,7 +35,8 @@ from app.services.jade import JadeUnavailable, MissionAlreadyRunning, jade
 from app.services.metadata import extract_gps
 from app.services.report import build_report
 from app.services.storage import (
-    ALLOWED_CONTENT_TYPES, AnalysisStorageError, mission_directory, read_analysis, save_upload, store_analysis,
+    ALLOWED_CONTENT_TYPES, AnalysisStorageError, mission_directory, original_key, read_analysis,
+    save_upload, store_analysis, store_object, store_original, use_original,
 )
 
 
@@ -167,19 +169,17 @@ async def create_mission(
 
     mission = Mision(id_faena=target_faena_id(session, cuenta, faena_id), nombre=name, tramo=segment)
     session.add(mission)
-    session.commit()
-    session.refresh(mission)
-    for upload in files:
-        target = await save_upload(mission.id_mision, upload)
-        try:
-            with Image.open(target) as image:
-                width, height = image.size
-                latitude, longitude = extract_gps(image)
-        except Exception as error:
-            target.unlink(missing_ok=True)
-            raise HTTPException(status_code=422, detail=f"Invalid image: {upload.filename}") from error
-        session.add(
-            Imagen(
+    originals = []
+    try:
+        for upload in files:
+            target = await save_upload(mission.id_mision, upload)
+            try:
+                with Image.open(target) as image:
+                    width, height = image.size
+                    latitude, longitude = extract_gps(image)
+            except (OSError, ValueError, Image.DecompressionBombError) as error:
+                raise HTTPException(status_code=422, detail=f"Invalid image: {upload.filename}") from error
+            record = Imagen(
                 id_mision=mission.id_mision,
                 nombre_archivo=upload.filename or target.name,
                 ruta_almacenada=str(target),
@@ -189,8 +189,19 @@ async def create_mission(
                 latitud=latitude,
                 longitud=longitude,
             )
-        )
-    session.commit()
+            originals.append((target, record.tipo_contenido))
+            session.add(record)
+        if settings.analysis_s3_bucket:
+            for target, content_type in originals:
+                await run_in_threadpool(store_original, mission.id_mision, target, content_type)
+                target.unlink()
+        session.commit()
+    except (HTTPException, AnalysisStorageError, SQLAlchemyError, OSError) as error:
+        session.rollback()
+        shutil.rmtree(settings.upload_dir / mission.id_mision, ignore_errors=True)
+        if isinstance(error, HTTPException):
+            raise
+        raise HTTPException(503, detail="No se pudieron guardar las imágenes originales.") from error
     return serialize_mission(session, mission)
 
 
@@ -202,8 +213,6 @@ def create_demo_mission(cuenta: CurrentFaena, session: Session = Depends(get_ses
         tramo="Tramo A · km 2,4–3,0",
     )
     session.add(mission)
-    session.commit()
-    session.refresh(mission)
     directory = mission_directory(mission.id_mision)
     for index in range(4):
         image = Image.new("RGB", (1200, 700), (138, 169, 179))
@@ -215,6 +224,14 @@ def create_demo_mission(cuenta: CurrentFaena, session: Session = Depends(get_ses
         draw.ellipse((810 - index * 35, 465, 875 - index * 35, 515), fill=(65, 58, 48))
         path = directory / f"DJI_DEMO_{index + 1:04}.jpg"
         image.save(path, "JPEG", quality=88)
+        if settings.analysis_s3_bucket:
+            try:
+                store_original(mission.id_mision, path, "image/jpeg")
+                path.unlink()
+            except (AnalysisStorageError, OSError) as error:
+                session.rollback()
+                shutil.rmtree(directory, ignore_errors=True)
+                raise HTTPException(503, detail="No se pudieron guardar las imágenes originales.") from error
         session.add(
             Imagen(
                 id_mision=mission.id_mision,
@@ -291,6 +308,7 @@ def delete_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
     if image_ids:
         session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
     session.exec(delete(Imagen).where(Imagen.id_mision == mission.id_mision))
+    session.exec(delete(Informe).where(Informe.id_mision == mission.id_mision))
     session.delete(mission)
     session.commit()
     shutil.rmtree(settings.upload_dir / mission_id, ignore_errors=True)
@@ -328,13 +346,13 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
                 active_detection[mission_id] = DetectionProgressRead(phase="processing", completed=0, total=total)
             predictions = []
             for completed, image in enumerate(images, start=1):
-                path = Path(image.ruta_almacenada)
-                if isinstance(detector, RemoteDetector) and settings.analysis_s3_bucket:
-                    overlay = Path(work_dir) / f"{image.id_imagen}.jpg"
-                    findings = detector.predict(path, output_path=overlay)
-                    image.clave_analisis_s3 = store_analysis(mission_id, image.id_imagen, overlay)
-                else:
-                    findings = detector.predict(path)
+                with use_original(mission_id, Path(image.ruta_almacenada)) as path:
+                    if isinstance(detector, RemoteDetector) and settings.analysis_s3_bucket:
+                        overlay = Path(work_dir) / f"{image.id_imagen}.jpg"
+                        findings = detector.predict(path, output_path=overlay)
+                        image.clave_analisis_s3 = store_analysis(mission_id, image.id_imagen, overlay)
+                    else:
+                        findings = detector.predict(path)
                 predictions.append((image, findings))
                 with detection_lock:
                     active_detection[mission_id] = DetectionProgressRead(
@@ -470,6 +488,12 @@ def get_image(mission_id: str, image_id: str, cuenta: CurrentFaena,
         except AnalysisStorageError as error:
             raise HTTPException(503, detail=str(error)) from error
     path = overlay_path(Path(image.ruta_almacenada)) if analysis else Path(image.ruta_almacenada)
+    if not analysis and settings.analysis_s3_bucket:
+        try:
+            return Response(read_analysis(original_key(mission_id, path)), media_type=image.tipo_contenido)
+        except AnalysisStorageError as error:
+            if not path.is_file():
+                raise HTTPException(503, detail=str(error)) from error
     if not path.is_file():
         raise HTTPException(404, detail="Image not found")
     return FileResponse(
@@ -515,8 +539,30 @@ def get_report(
     detections = [item for item in detections if item.clase != OFF_ROAD_LABEL]
     with_findings = {item.id_imagen for item in detections if item.estado_revision != "rejected"}
     images = [image for image in images if image.id_imagen in with_findings]
-    # Las rocas fuera de la pista solo se dibujan en la imagen como referencia (no son hallazgos).
-    report = build_report(mission, images, detections, context_detections=off_road, view=vista)
+    try:
+        with ExitStack() as originals:
+            for image in images:
+                originals.enter_context(use_original(mission_id, Path(image.ruta_almacenada)))
+            # Las rocas fuera de la pista se dibujan como referencia.
+            report = build_report(mission, images, detections, context_detections=off_road, view=vista)
+    except (AnalysisStorageError, OSError) as error:
+        raise HTTPException(503, detail="No se pudieron leer los originales del informe.") from error
+    if settings.analysis_s3_bucket:
+        try:
+            session.exec(select(Mision).where(Mision.id_mision == mission_id).with_for_update()).one()
+            stored = session.exec(select(Informe).where(Informe.id_mision == mission_id)).first()
+            key = f"reports/{mission_id}/informe.pdf"
+            store_object(key, report, "application/pdf")
+            if stored is None:
+                stored = Informe(id_mision=mission_id, clave_objeto_s3=key)
+            stored.clave_objeto_s3 = key
+            stored.fecha_generacion = datetime.now(timezone.utc)
+            stored.total_hallazgos = sum(item.estado_revision != "rejected" for item in detections)
+            session.add(stored)
+            session.commit()
+        except (AnalysisStorageError, SQLAlchemyError) as error:
+            session.rollback()
+            raise HTTPException(503, detail="No se pudo guardar el informe.") from error
     return Response(
         content=report,
         media_type="application/pdf",

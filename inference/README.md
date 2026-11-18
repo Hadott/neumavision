@@ -165,6 +165,12 @@ Consultar el arranque con `sudo journalctl -u neumavision-inference -n 50`.
 
 ### Nina
 
+Nina solicita a Jade la medición de ancho mediante `include_road_width=true`
+en `POST /predict`. Jade devuelve el resumen y el JPEG anotado en
+`road_width`. Si una versión anterior devuelve solo la máscara, Nina
+calcula el ancho localmente. Si se configura `DEFAULT_GSD_CM_PX` en Nina,
+se envía a Jade como escala de respaldo para fotos sin EXIF suficiente.
+
 En Ubuntu, instalar `libgl1` para que OpenCV pueda calcular el ancho
 del camino con la máscara que devuelve Jade.
 
@@ -203,27 +209,32 @@ arranca automáticamente con el sistema operativo. Configurar en Nina:
 | `JADE_INSTANCE_ID` | ID EC2 de Jade |
 | `JADE_REGION` | Región de Jade (por defecto `us-east-2`) |
 | `JADE_START_TIMEOUT` | Espera máxima del arranque y carga, en segundos (300 por defecto) |
+| `JADE_IDLE_TIMEOUT_SECONDS` | Segundos de inactividad antes del apagado (1200 por defecto). Usar 0 para desactivar el apagado automático. |
 | `INFERENCE_TIMEOUT` | Tiempo máximo por solicitud de imagen, en segundos (300 por defecto) |
-| `ANALYSIS_S3_BUCKET` | Bucket privado para los JPEG procesados |
+| `ANALYSIS_S3_BUCKET` | Bucket privado para originales, JPEG procesados y PDF |
 
 El rol de instancia de Nina requiere `ec2:DescribeInstances` sobre `*` y
 `ec2:StartInstances` y `ec2:StopInstances` limitados al ARN de Jade. Para S3
-requiere `s3:PutObject` y `s3:GetObject` sobre
-`arn:aws:s3:::NOMBRE_BUCKET/analysis/*`. Ver [ejemplos de políticas de EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ExamplePolicies_EC2.html).
+requiere `s3:PutObject` y `s3:GetObject` en los prefijos `originals/*`,
+`analysis/*` y `reports/*` del bucket. Ver [ejemplos de políticas de EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ExamplePolicies_EC2.html).
 
 Instalar los requisitos del backend y aplicar la revisión Alembic
 `20261118_0008` antes de actualizar el servicio. Verificar la URL y
 `SELECT current_database()` antes de migrar RDS. Esta revisión agrega a
-`imagen` la clave S3 opcional del JPEG procesado. Las imágenes originales
-siguen en el almacenamiento local de Nina. El visor recupera los JPEG privados
-a través del backend, después de comprobar el acceso a la misión.
+`imagen` la clave S3 opcional del JPEG procesado. Con el bucket configurado,
+Nina guarda los originales en `originals/{id_mision}/{archivo}` y elimina
+la copia local al finalizar la carga. Para procesar o generar informes,
+recupera temporalmente el original desde S3 y lo borra al dejar de usarlo.
+Al generar un informe, Nina guarda el PDF más reciente en
+`reports/{id_mision}/informe.pdf` y su clave en `informe`. El visor comprueba
+el acceso a la misión antes de entregar imágenes y PDF.
 
 Con `JADE_INSTANCE_ID` configurado, ejecutar Nina con **un único proceso
 y un único worker**. El endpoint de detección sigue siendo síncrono.
 Ajustar el timeout del proxy para cubrir el arranque en frío y la inferencia
 de todas las imágenes de una misión. Nina reintenta si AWS devuelve un error
 de capacidad temporal de EC2. Cuando termina el último trabajo registrado,
-Nina espera 20 minutos antes de solicitar el apagado. Una nueva misión
+Nina espera 20 minutos por defecto antes de solicitar el apagado. Una nueva misión
 reinicia el plazo. Nina comprueba la inactividad cada 15 segundos mientras
 el backend está en ejecución. Si se reinicia Nina, una instancia encendida
 recibe un nuevo plazo de inactividad. Un error al detener Jade queda en el log.

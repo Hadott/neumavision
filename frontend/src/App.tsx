@@ -629,7 +629,9 @@ export default function App() {
           <small>
             {inferenceHealth.status === "starting"
               ? "Jade está iniciando y cargando los modelos. Puede tardar unos minutos."
-              : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
+              : inferenceHealth.idle_timeout_seconds === 0
+                ? "Apagado automático desactivado."
+                : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
           </small>
         )}
       </div>

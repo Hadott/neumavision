@@ -551,8 +551,9 @@ La ausencia de máscara es un error de cruce, no un resultado sin hallazgos.
 El visor muestra la máscara verde (clase 1) o naranja (clase 2) con etiqueta sin
 confianza y las cajas interactivas de los hallazgos. Las imágenes derivadas se
 sirven con autorización por faena. La inferencia no accede a RDS ni S3. Nina puede guardar los JPEG procesados
-en un bucket privado y registrar sus claves en RDS. Los originales siguen
-almacenados localmente en Nina.
+en un bucket privado y registrar sus claves en RDS. Nina también respalda los
+originales en el bucket, usa copias temporales en Nina y guarda el PDF más reciente
+de cada misión con su referencia en RDS.
 
 Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga ambos modelos YOLO26 al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
 Un único proceso de Nina coordina los trabajos y solicita apagar Jade tras
