@@ -16,6 +16,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 CAPACITY_ERRORS = {"InsufficientInstanceCapacity", "InsufficientHostCapacity"}
+IDLE_TIMEOUT_SECONDS = 20 * 60
+IDLE_CHECK_SECONDS = 15
 
 
 class JadeUnavailable(RuntimeError):
@@ -33,7 +35,7 @@ class Jade:
         self.missions: set[str] = set()
         self.stop_requested = False
         self.ready = False
-        self.can_stop = False
+        self.idle_since: float | None = None
 
     @cached_property
     def ec2(self):
@@ -41,39 +43,78 @@ class Jade:
             connect_timeout=5, read_timeout=5, retries={"total_max_attempts": 2},
         ))
 
+    def instance_state(self) -> str:
+        result = self.ec2.describe_instances(InstanceIds=[settings.jade_instance_id])
+        return result["Reservations"][0]["Instances"][0]["State"]["Name"]
+
+    def service_ready(self) -> bool:
+        try:
+            response = httpx.get(settings.inference_url.rstrip("/") + "/health", timeout=3)
+            return response.is_success and response.json().get("status") == "ok"
+        except (httpx.RequestError, ValueError, AttributeError):
+            return False
+
+    def status(self) -> str:
+        if settings.detector_mode != "remote":
+            return "disabled"
+        if not settings.jade_instance_id:
+            return "up" if self.service_ready() else "unavailable"
+        try:
+            state = self.instance_state()
+        except (BotoCoreError, ClientError, IndexError, KeyError):
+            logger.warning("No se pudo consultar el estado de Jade", exc_info=True)
+            return "unknown"
+        if state == "running":
+            if self.service_ready():
+                return "up"
+            with self.lock:
+                return "starting" if self.missions and not self.ready else "unavailable"
+        return {
+            "pending": "starting", "stopping": "stopping", "shutting-down": "stopping",
+            "stopped": "down", "terminated": "down",
+        }.get(state, "unknown")
+
+    def stop_if_idle(self) -> None:
+        with self.lock:
+            if self.missions:
+                return
+            try:
+                state = self.instance_state()
+                if state not in {"pending", "running"}:
+                    self.idle_since = None
+                    return
+                now = monotonic()
+                if self.idle_since is None:
+                    self.idle_since = now
+                if state == "running" and now - self.idle_since >= IDLE_TIMEOUT_SECONDS:
+                    self.ec2.stop_instances(InstanceIds=[settings.jade_instance_id])
+                    self.stop_requested = True
+                    self.idle_since = None
+            except (BotoCoreError, ClientError, IndexError, KeyError):
+                logger.exception("No se pudo comprobar o detener Jade por inactividad")
+
     def wait_until_ready(self) -> None:
         deadline = monotonic() + settings.jade_start_timeout
         instance_ids = [settings.jade_instance_id]
         started = False
         while monotonic() < deadline:
-            result = self.ec2.describe_instances(InstanceIds=instance_ids)
-            state = result["Reservations"][0]["Instances"][0]["State"]["Name"]
+            state = self.instance_state()
             if state in {"shutting-down", "terminated"}:
                 raise JadeUnavailable("La instancia de inferencia ya no está disponible.")
-            if state in {"pending", "running"} and not self.stop_requested:
-                self.can_stop = True
             if state == "stopped":
                 self.stop_requested = False
                 if not started:
                     try:
                         self.ec2.start_instances(InstanceIds=instance_ids)
                         started = True
-                        self.can_stop = True
                     except ClientError as error:
                         if error.response["Error"]["Code"] not in CAPACITY_ERRORS:
                             raise
                         logger.warning("AWS no tiene capacidad para iniciar Jade. Se reintentará.")
                         sleep(min(15, max(0, deadline - monotonic())))
                         continue
-            if state == "running" and not self.stop_requested:
-                try:
-                    response = httpx.get(
-                        settings.inference_url.rstrip("/") + "/health", timeout=3,
-                    )
-                    if response.is_success and response.json().get("status") == "ok":
-                        return
-                except (httpx.RequestError, ValueError, AttributeError):
-                    pass
+            if state == "running" and not self.stop_requested and self.service_ready():
+                return
             sleep(min(3, max(0, deadline - monotonic())))
         raise JadeUnavailable("Jade no estuvo lista a tiempo. Puedes reintentar el procesamiento.")
 
@@ -83,6 +124,7 @@ class Jade:
             if mission_id in self.missions:
                 raise MissionAlreadyRunning("La misión ya se está procesando.")
             self.missions.add(mission_id)
+            self.idle_since = None
         try:
             with self.start_lock:
                 if not self.ready:
@@ -98,13 +140,7 @@ class Jade:
                 self.missions.remove(mission_id)
                 if not self.missions:
                     self.ready = False
-                if not self.missions and self.can_stop:
-                    try:
-                        self.ec2.stop_instances(InstanceIds=[settings.jade_instance_id])
-                        self.stop_requested = True
-                        self.can_stop = False
-                    except (BotoCoreError, ClientError):
-                        logger.exception("No se pudo detener Jade")
+                    self.idle_since = monotonic()
 
 
 jade = Jade()

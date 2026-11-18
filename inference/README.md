@@ -165,6 +165,13 @@ Consultar el arranque con `sudo journalctl -u neumavision-inference -n 50`.
 
 ### Nina
 
+En Ubuntu, instalar `libgl1` para que OpenCV pueda calcular el ancho
+del camino con la máscara que devuelve Jade.
+
+```bash
+sudo apt-get install --no-install-recommends libgl1
+```
+
 Desde Nina, comprobar primero que Jade responde:
 
 ```bash
@@ -216,10 +223,22 @@ y un único worker**. El endpoint de detección sigue siendo síncrono.
 Ajustar el timeout del proxy para cubrir el arranque en frío y la inferencia
 de todas las imágenes de una misión. Nina reintenta si AWS devuelve un error
 de capacidad temporal de EC2. Cuando termina el último trabajo registrado,
-Nina solicita detener Jade. Un error al detenerla se registra en el log de Nina.
-Si Nina cae durante la inferencia, revisar el estado de Jade en EC2.
+Nina espera 20 minutos antes de solicitar el apagado. Una nueva misión
+reinicia el plazo. Nina comprueba la inactividad cada 15 segundos mientras
+el backend está en ejecución. Si se reinicia Nina, una instancia encendida
+recibe un nuevo plazo de inactividad. Un error al detener Jade queda en el log.
+
+`GET /api/v1/inference/health` requiere autenticación y combina el estado
+de EC2 con la disponibilidad de `/health` de Jade. La plataforma actualiza
+el indicador cada cinco segundos.
+
+`GET /api/v1/missions/{id}/detect/progress` verifica el acceso a la misión y
+devuelve la fase, las imágenes procesadas y una estimación del tiempo de
+análisis restante tras completar la primera imagen. Devuelve `null` cuando
+no hay una detección activa. El progreso se mantiene en el proceso de Nina
+mientras se ejecuta la solicitud de detección.
 
 Para validar en AWS, partir con Jade detenida y ejecutar la detección de una
 misión pequeña. Verificar que Jade pasa a `running`, que el visor carga el JPEG
 y las detecciones tras recargar la página, y que Jade pasa a `stopping` y luego
-a `stopped` cuando ya no hay solicitudes de procesamiento.
+a `stopped` tras 20 minutos sin trabajos.

@@ -13,6 +13,7 @@ def manager(monkeypatch):
     manager = lifecycle.Jade()
     manager.ec2 = Mock()
     monkeypatch.setattr(settings, "jade_instance_id", "i-0123456789abcdef0")
+    monkeypatch.setattr(settings, "detector_mode", "remote")
     monkeypatch.setattr(lifecycle, "sleep", lambda _: None)
     return manager
 
@@ -21,7 +22,7 @@ def instance(state):
     return {"Reservations": [{"Instances": [{"State": {"Name": state}}]}]}
 
 
-def test_wait_for_capacity_and_readiness_and_stop_after_last_job(manager, monkeypatch):
+def test_wait_for_capacity_and_readiness_and_stop_after_idle(manager, monkeypatch):
     manager.ec2.describe_instances.side_effect = [
         instance("stopped"), instance("stopped"), instance("pending"),
         instance("running"), instance("running"),
@@ -40,6 +41,16 @@ def test_wait_for_capacity_and_readiness_and_stop_after_last_job(manager, monkey
         with manager.mission("second"):
             manager.ec2.stop_instances.assert_not_called()
         manager.ec2.stop_instances.assert_not_called()
+
+    manager.ec2.stop_instances.assert_not_called()
+    manager.ec2.describe_instances.side_effect = None
+    manager.ec2.describe_instances.return_value = instance("running")
+    finished = manager.idle_since
+    monkeypatch.setattr(lifecycle, "monotonic", lambda: finished + 1199)
+    manager.stop_if_idle()
+    manager.ec2.stop_instances.assert_not_called()
+    monkeypatch.setattr(lifecycle, "monotonic", lambda: finished + 1200)
+    manager.stop_if_idle()
 
     assert manager.ec2.start_instances.call_count == 2
     assert health.call_count == 2
@@ -61,4 +72,43 @@ def test_requests_arriving_after_shutdown_wait_for_fresh_boot(manager, monkeypat
 
     health.assert_called_once()
     manager.ec2.start_instances.assert_called_once()
-    manager.ec2.stop_instances.assert_called_once()
+    manager.ec2.stop_instances.assert_not_called()
+    assert manager.idle_since is not None
+
+
+def test_active_mission_resets_idle_window(manager, monkeypatch):
+    manager.ec2.describe_instances.return_value = instance("running")
+    monkeypatch.setattr(lifecycle.httpx, "get", Mock(return_value=httpx.Response(200, json={"status": "ok"})))
+    clock = Mock(return_value=10)
+    monkeypatch.setattr(lifecycle, "monotonic", clock)
+    manager.stop_if_idle()
+    with manager.mission("active"):
+        clock.return_value = 1300
+        manager.stop_if_idle()
+        manager.ec2.stop_instances.assert_not_called()
+    assert manager.idle_since == 1300
+    clock.return_value = 2499
+    manager.stop_if_idle()
+    manager.ec2.stop_instances.assert_not_called()
+
+
+@pytest.mark.parametrize(("state", "expected"), [
+    ("pending", "starting"),
+    ("running", "up"),
+    ("stopping", "stopping"),
+    ("stopped", "down"),
+])
+def test_status_reports_ec2_and_readiness(manager, monkeypatch, state, expected):
+    manager.ec2.describe_instances.return_value = instance(state)
+    health = Mock(return_value=httpx.Response(200, json={"status": "ok"}))
+    monkeypatch.setattr(lifecycle.httpx, "get", health)
+    assert manager.status() == expected
+    assert health.call_count == int(state == "running")
+
+
+def test_running_instance_without_ready_service(manager, monkeypatch):
+    manager.ec2.describe_instances.return_value = instance("running")
+    monkeypatch.setattr(lifecycle.httpx, "get", Mock(return_value=httpx.Response(503)))
+    assert manager.status() == "unavailable"
+    manager.missions.add("starting")
+    assert manager.status() == "starting"

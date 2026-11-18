@@ -98,6 +98,8 @@ def isolated_platform(tmp_path, monkeypatch):
         app.dependency_overrides[get_session] = lambda: session
         app.dependency_overrides[get_current_faena] = lambda: actor
         monkeypatch.setattr(settings, "detector_mode", "remote")
+        monkeypatch.setattr(settings, "jade_instance_id", "")
+        monkeypatch.setattr(settings, "analysis_s3_bucket", "")
         try:
             yield TestClient(app), session, path
         finally:
@@ -122,6 +124,29 @@ def test_platform_success_ownership_and_inference_failure(isolated_platform, mon
     monkeypatch.setattr(httpx, "post", unavailable)
     assert client.post("/api/v1/missions/own/detect").status_code == 502
     assert len(session.exec(select(Deteccion)).all()) == 1
+
+
+def test_detection_progress_counts_finished_images(isolated_platform, monkeypatch):
+    client, session, path = isolated_platform
+    session.add(Imagen(id_imagen="image-2", id_mision="own", nombre_archivo="segunda.jpg",
+                      ruta_almacenada=str(path), ancho=100, alto=80))
+    session.commit()
+    progress_url = "/api/v1/missions/own/detect/progress"
+    snapshots = []
+
+    def predict(*args, **kwargs):
+        snapshots.append(client.get(progress_url).json())
+        return httpx.Response(200, json=payload_for(path), request=httpx.Request("POST", "http://inference/predict"))
+
+    monkeypatch.setattr(httpx, "post", predict)
+    assert client.get("/api/v1/missions/other/detect/progress").status_code == 404
+    assert client.get(progress_url).json() is None
+    assert client.post("/api/v1/missions/own/detect").status_code == 200
+    assert [snapshot["completed"] for snapshot in snapshots] == [0, 1]
+    assert all(snapshot["total"] == 2 for snapshot in snapshots)
+    assert snapshots[0]["estimated_remaining_seconds"] is None
+    assert snapshots[1]["estimated_remaining_seconds"] >= 0
+    assert client.get(progress_url).json() is None
 
 
 def test_platform_zero_findings_and_database_failure(isolated_platform, monkeypatch):

@@ -97,6 +97,18 @@ export type Health = {
   database: string;
 };
 
+export type InferenceHealth = {
+  status: "up" | "down" | "starting" | "stopping" | "unavailable" | "unknown" | "disabled";
+  idle_timeout_seconds: number | null;
+};
+
+export type DetectionProgress = {
+  phase: "starting" | "processing" | "saving";
+  completed: number;
+  total: number;
+  estimated_remaining_seconds: number | null;
+};
+
 export type Account = {
   id: string;
   nombre: string;

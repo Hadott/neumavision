@@ -1,4 +1,4 @@
-import type { Account, DashboardFinding, Detection, Health, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, Session } from "./types";
 
 // Por defecto la API se llama en la misma dirección del sitio; Vite la redirige al backend.
 export const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
@@ -72,6 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>("/health"),
+  inferenceHealth: () => request<InferenceHealth>("/inference/health"),
 
   login: (correo: string, contrasena: string) =>
     request<Session>("/auth/login", {
@@ -107,13 +108,34 @@ export const api = {
 
   getMission: (id: string) => request<Mission>(`/missions/${id}`),
 
-  createMission: (name: string, segment: string, files: File[], faenaId?: string) => {
+  createMission: (name: string, segment: string, files: File[], faenaId: string | undefined,
+    onUpload: (loaded: number, total: number) => void) => {
     const body = new FormData();
     body.append("name", name);
     body.append("segment", segment);
     if (faenaId) body.append("faena_id", faenaId);
     files.forEach((file) => body.append("files", file));
-    return request<Mission>("/missions", { method: "POST", body });
+    return new Promise<Mission>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_URL}/missions`);
+      xhr.responseType = "json";
+      Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onUpload(event.loaded, event.total);
+      };
+      xhr.upload.onload = () => onUpload(1, 1);
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300 && xhr.response) {
+          resolve(xhr.response as Mission);
+          return;
+        }
+        if (xhr.status === 401 && currentSession) onUnauthorized?.();
+        const detail = xhr.response?.detail;
+        reject(new Error(typeof detail === "string" ? detail : `No fue posible cargar la misión (HTTP ${xhr.status}).`));
+      };
+      xhr.onerror = () => reject(new Error("Se perdió la conexión durante la carga de imágenes."));
+      xhr.send(body);
+    });
   },
 
   deleteMission: (missionId: string) =>
@@ -125,6 +147,9 @@ export const api = {
     }),
 
   detect: (missionId: string) => request<Mission>(`/missions/${missionId}/detect`, { method: "POST" }),
+  detectionProgress: (missionId: string) => request<DetectionProgress | null>(
+    `/missions/${missionId}/detect/progress`, { cache: "no-store" }
+  ),
   editMission: (missionId: string, name: string, segment: string) =>
     request<Mission>(`/missions/${missionId}`, {
       method: "PATCH",

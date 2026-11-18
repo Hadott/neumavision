@@ -41,7 +41,7 @@ import DashboardStats from "./DashboardStats";
 import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
 import Login from "./Login";
 import MapPanel from "./MapPanel";
-import type { Account, DashboardFinding, Detection, Health, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, Session } from "./types";
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
@@ -49,6 +49,16 @@ type Screen = "history" | "workspace" | "dashboard" | "accounts";
 type View = "upload" | "review" | "report";
 type Busy = "upload" | "detect" | "report" | "open" | null;
 type DashReview = "pending" | "confirmed";
+
+const inferenceStatusLabel: Record<InferenceHealth["status"], string> = {
+  up: "Encendida · Up",
+  down: "Apagada · Down",
+  starting: "Encendiendo",
+  stopping: "Apagando",
+  unavailable: "Servicio sin respuesta",
+  unknown: "Estado no disponible",
+  disabled: "Inferencia remota desactivada",
+};
 
 const colorForLabel: Record<string, string> = {
   Rocas: "#dc2626",
@@ -95,6 +105,19 @@ const formatDuration = (milliseconds: number) => {
   const seconds = Math.round(milliseconds / 1000);
   return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
 };
+
+function ProgressBar({ label, fraction }: { label: string; fraction?: number }) {
+  const percent = fraction == null ? undefined : Math.floor(fraction * 100);
+  return (
+    <div className="task-progress-bar">
+      <div className="task-progress-track" role="progressbar" aria-label={label}
+        aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+        {percent != null && <div className="task-progress-fill" style={{ width: `${percent}%` }} />}
+      </div>
+      <span aria-hidden="true">{percent == null ? "—" : `${percent}%`}</span>
+    </div>
+  );
+}
 const statusLabel = (status: string) => (status === "review" ? "En revisión" : "Cargada");
 const formatDate = (value: string) =>
   new Date(value).toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
@@ -107,6 +130,7 @@ const ALL_DASH_REPAIR: RepairStatus[] = ["pending", "repaired"];
 
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [inferenceHealth, setInferenceHealth] = useState<InferenceHealth | null>(null);
   const [screen, setScreen] = useState<Screen>("history");
   const [view, setView] = useState<View>("upload");
   const [mission, setMission] = useState<Mission | null>(null);
@@ -118,6 +142,8 @@ export default function App() {
   const [busy, setBusy] = useState<Busy>(null);
   const [detectionStart, setDetectionStart] = useState<{ missionId: string; timestamp: number } | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState<{ fraction: number; remaining: number | null } | null>(null);
+  const [detectionProgress, setDetectionProgress] = useState<DetectionProgress | null>(null);
   const [detectionSummary, setDetectionSummary] = useState<{
     missionId: string;
     milliseconds: number;
@@ -153,6 +179,23 @@ export default function App() {
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    let active = true;
+    let timer: number;
+    async function pollInferenceHealth() {
+      const next = await api.inferenceHealth().catch(() => null);
+      if (!active) return;
+      setInferenceHealth(next);
+      timer = window.setTimeout(pollInferenceHealth, 5000);
+    }
+    void pollInferenceHealth();
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [session]);
 
   useEffect(() => {
     setUnauthorizedHandler(() => logout("Tu sesión venció. Inicia sesión nuevamente."));
@@ -194,7 +237,24 @@ export default function App() {
   useEffect(() => {
     if (!detectionStart) return;
     const interval = window.setInterval(() => setElapsed(performance.now() - detectionStart.timestamp), 250);
-    return () => window.clearInterval(interval);
+    let active = true;
+    let timer: number;
+    const missionId = detectionStart.missionId;
+    async function pollProgress() {
+      try {
+        const next = await api.detectionProgress(missionId);
+        if (active && next) setDetectionProgress(next);
+      } catch {
+        // El POST de detección sigue siendo la fuente del resultado o del error.
+      }
+      if (active) timer = window.setTimeout(pollProgress, 1000);
+    }
+    void pollProgress();
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.clearTimeout(timer);
+    };
   }, [detectionStart]);
 
   const allDetections = useMemo(
@@ -393,8 +453,17 @@ export default function App() {
     }
     setBusy("upload");
     setError("");
+    const startedAt = performance.now();
+    setUploadProgress(null);
     try {
-      const created = await api.createMission(missionName, segment, files, isAdmin ? missionFaena : undefined);
+      const created = await api.createMission(missionName, segment, files, isAdmin ? missionFaena : undefined, (loaded, total) => {
+        const fraction = loaded / total;
+        const elapsedSeconds = (performance.now() - startedAt) / 1000;
+        setUploadProgress({
+          fraction,
+          remaining: fraction > 0 && fraction < 1 ? elapsedSeconds / fraction * (1 - fraction) : null,
+        });
+      });
       setMission(created);
       setSelectedImageId("");
       setFiles([]);
@@ -402,6 +471,7 @@ export default function App() {
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No fue posible cargar la misión.");
     } finally {
+      setUploadProgress(null);
       setBusy(null);
     }
   }
@@ -413,6 +483,7 @@ export default function App() {
     setError("");
     setElapsed(0);
     setDetectionSummary(null);
+    setDetectionProgress(null);
     setDetectionStart({ missionId: mission.id, timestamp: startedAt });
     try {
       const processed = await api.detect(mission.id);
@@ -549,6 +620,19 @@ export default function App() {
           <button className="button ghost" onClick={() => logout()}><LogOut size={15} /> Cerrar sesión</button>
         </div>
       </header>
+
+      <div className="inference-health" role="status">
+        <strong><span className={`inference-indicator ${inferenceHealth?.status ?? "unknown"}`} aria-hidden="true" />
+          Jade · {inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
+        </strong>
+        {inferenceHealth?.idle_timeout_seconds != null && (
+          <small>
+            {inferenceHealth.status === "starting"
+              ? "Jade está iniciando y cargando los modelos. Puede tardar unos minutos."
+              : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
+          </small>
+        )}
+      </div>
 
       <AnimatePresence mode="wait">
       {screen === "accounts" && isAdmin && (
@@ -914,10 +998,38 @@ export default function App() {
           {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
           {health?.detector === "mock" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
 
+          {busy === "upload" && (
+            <section className="task-progress" aria-label="Carga de fotos">
+              <strong>{uploadProgress?.fraction === 1 ? "Guardando imágenes en Nina…" : "Subiendo imágenes a Nina…"}</strong>
+              <ProgressBar label="Datos enviados a Nina" fraction={uploadProgress?.fraction ?? 0} />
+              {uploadProgress?.remaining != null && (
+                <small>Quedan aprox. {formatDuration(uploadProgress.remaining * 1000)}</small>
+              )}
+            </section>
+          )}
+
           {mission && (
             <div role="status">
               {detectionStart?.missionId === mission.id ? (
-                <p className="inference-duration"><Clock size={15} /> Tiempo transcurrido · {formatDuration(elapsed)}</p>
+                <section className="task-progress" aria-label="Progreso de inferencia">
+                  <strong>
+                    {detectionProgress?.phase === "starting" ? "Esperando que Jade esté lista…"
+                      : detectionProgress?.phase === "saving" ? "Guardando los resultados…"
+                      : detectionProgress ? "Procesando imágenes…" : "Detección solicitada"}
+                  </strong>
+                  <ProgressBar label="Imágenes procesadas"
+                    fraction={detectionProgress ? detectionProgress.completed / detectionProgress.total : undefined} />
+                  <small>
+                    Tiempo transcurrido · {formatDuration(elapsed)}
+                    {detectionProgress && ` · ${detectionProgress.completed} de ${detectionProgress.total} imágenes procesadas`}
+                    {detectionProgress?.estimated_remaining_seconds != null &&
+                      ` · Quedan aprox. ${formatDuration(detectionProgress.estimated_remaining_seconds * 1000)} de análisis`}
+                  </small>
+                  {!detectionProgress && <small>Porcentaje pendiente de los datos de progreso de Nina.</small>}
+                  {detectionProgress?.phase === "starting" && (
+                    <small>Si Jade está apagada, encenderla y cargar los modelos puede tardar unos minutos.</small>
+                  )}
+                </section>
               ) : detectionSummary?.missionId === mission.id && (
                 <p className="inference-duration">
                   <Clock size={15} />

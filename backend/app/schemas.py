@@ -118,3 +118,15 @@ class HealthRead(BaseModel):
     status: str
     detector: str
     database: str
+
+
+class InferenceHealthRead(BaseModel):
+    status: str
+    idle_timeout_seconds: int | None
+
+
+class DetectionProgressRead(BaseModel):
+    phase: Literal["starting", "processing", "saving"]
+    completed: int
+    total: int
+    estimated_remaining_seconds: float | None = None

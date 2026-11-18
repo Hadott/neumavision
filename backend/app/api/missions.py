@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Lock
+from time import monotonic
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
@@ -17,6 +19,7 @@ from app.database import get_session
 from app.models import Deteccion, Faena, Imagen, Mision
 from app.schemas import (
     DetectionRead,
+    DetectionProgressRead,
     DetectionRepairUpdate,
     DetectionReview,
     ImageCriticalityUpdate,
@@ -36,6 +39,8 @@ from app.services.storage import (
 
 
 router = APIRouter(prefix="/missions", tags=["missions"])
+active_detection: dict[str, DetectionProgressRead] = {}
+detection_lock = Lock()
 
 
 def serialize_detection(detection: Deteccion) -> DetectionRead:
@@ -292,6 +297,13 @@ def delete_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get("/{mission_id}/detect/progress", response_model=DetectionProgressRead | None)
+def detection_progress(mission_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)):
+    require_mission(session, mission_id, cuenta)
+    with detection_lock:
+        return active_detection.get(mission_id)
+
+
 @router.post("/{mission_id}/detect", response_model=MissionRead)
 def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)) -> MissionRead:
     mission = require_mission(session, mission_id, cuenta)
@@ -300,12 +312,22 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
     if not images:
         raise HTTPException(422, detail="La misión no tiene imágenes.")
     detector = get_detector()
-    lease = (jade.mission(mission_id)
-             if settings.jade_instance_id and isinstance(detector, RemoteDetector) else nullcontext())
+    managed = bool(settings.jade_instance_id) and isinstance(detector, RemoteDetector)
+    lease = jade.mission(mission_id) if managed else nullcontext()
+    total = len(images)
+    with detection_lock:
+        if mission_id in active_detection:
+            raise HTTPException(409, detail="La misión ya se está procesando.")
+        active_detection[mission_id] = DetectionProgressRead(
+            phase="starting" if managed else "processing", completed=0, total=total,
+        )
     try:
         with lease, TemporaryDirectory() as work_dir:
+            started = monotonic()
+            with detection_lock:
+                active_detection[mission_id] = DetectionProgressRead(phase="processing", completed=0, total=total)
             predictions = []
-            for image in images:
+            for completed, image in enumerate(images, start=1):
                 path = Path(image.ruta_almacenada)
                 if isinstance(detector, RemoteDetector) and settings.analysis_s3_bucket:
                     overlay = Path(work_dir) / f"{image.id_imagen}.jpg"
@@ -314,6 +336,15 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
                 else:
                     findings = detector.predict(path)
                 predictions.append((image, findings))
+                with detection_lock:
+                    active_detection[mission_id] = DetectionProgressRead(
+                        phase="saving" if completed == total else "processing",
+                        completed=completed, total=total,
+                        estimated_remaining_seconds=(
+                            (monotonic() - started) / completed * (total - completed)
+                            if completed < total else None
+                        ),
+                    )
             session.exec(delete(Deteccion).where(Deteccion.id_imagen.in_(image_ids)))
             for image, findings in predictions:
                 for prediction in findings:
@@ -333,6 +364,8 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
             mission.estado = "review"
             session.add(mission)
             session.commit()
+        session.refresh(mission)
+        return serialize_mission(session, mission)
     except MissionAlreadyRunning as error:
         raise HTTPException(409, detail=str(error)) from error
     except (JadeUnavailable, AnalysisStorageError) as error:
@@ -344,8 +377,9 @@ def detect_mission(mission_id: str, cuenta: CurrentFaena, session: Session = Dep
     except SQLAlchemyError as error:
         session.rollback()
         raise HTTPException(503, detail="No se pudieron guardar los hallazgos") from error
-    session.refresh(mission)
-    return serialize_mission(session, mission)
+    finally:
+        with detection_lock:
+            active_detection.pop(mission_id, None)
 
 
 @router.patch("/{mission_id}/detections/{detection_id}", response_model=DetectionRead)

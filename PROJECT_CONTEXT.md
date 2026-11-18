@@ -555,8 +555,10 @@ en un bucket privado y registrar sus claves en RDS. Los originales siguen
 almacenados localmente en Nina.
 
 Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga ambos modelos YOLO26 al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
-Un único proceso de Nina coordina los trabajos y solicita apagar Jade cuando
-termina el último. Variables, permisos y despliegue en `inference/README.md`.
+Un único proceso de Nina coordina los trabajos y solicita apagar Jade tras
+20 minutos sin trabajos de inferencia. El visor muestra el estado de EC2 y
+la disponibilidad de los modelos. Variables, permisos y despliegue en
+`inference/README.md`.
 
 Actualmente:
 
