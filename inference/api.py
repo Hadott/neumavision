@@ -64,9 +64,17 @@ def predict(
         bgr = cv2.imread(str(source))
         if bgr is None:
             raise HTTPException(422, "Imagen invalida")
+        height, width = bgr.shape[:2]
         try:
+            queued_at = perf_counter()
             with model_lock:
+                inference_started = perf_counter()
                 result = run(source, root, draw_candidates=False)
+                inference_seconds = perf_counter() - inference_started
+            logger.info(
+                "Imagen %r (%dx%d): inferencia %.2f s, espera de modelos %.2f s",
+                file.filename, width, height, inference_seconds, inference_started - queued_at,
+            )
             if result["cross_status"] != "evaluated":
                 raise HTTPException(422, "No se obtuvo mascara del camino; cruce no evaluado")
             response = {
@@ -96,9 +104,11 @@ def predict(
                         "summary": summary,
                         "overlay_jpeg": base64.b64encode(jpeg.tobytes()).decode("ascii"),
                     }
-                    logger.info("Ancho de pista calculado en %.2f s", perf_counter() - started)
+                    logger.info("Imagen %r: ancho de pista calculado en %.2f s",
+                                file.filename, perf_counter() - started)
                 except (OSError, ValueError, RuntimeError, cv2.error):
-                    logger.warning("No se pudo calcular el ancho de pista", exc_info=True)
+                    logger.warning("Imagen %r: falló el cálculo de ancho de pista tras %.2f s",
+                                   file.filename, perf_counter() - started, exc_info=True)
             else:
                 response["road_mask_png"] = (
                     base64.b64encode(mask_file.read_bytes()).decode("ascii") if mask_file.is_file() else None

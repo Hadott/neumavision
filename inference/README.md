@@ -49,8 +49,16 @@ Con el entorno de inferencia que tiene Ultralytics:
 .\inference\.venv\Scripts\python.exe -m unittest discover -s inference -p "test_*.py"
 ```
 
-El pipeline ejecuta ambos modelos sobre la misma imagen. Selecciona únicamente
-la máscara de segmentación con mayor confianza, sin umbral mínimo, y conserva
+El pipeline local y `POST /predict` reducen las fotos cuyo lado largo supera
+3840 px antes de ejecutar ambos modelos. Se mantiene la proporción y las fotos
+más pequeñas conservan su resolución. Se aceptan fotos de 6K dentro del límite
+de carga de 30 MiB de la API. Las cajas, la máscara y la vista de alarmas se
+generan en la resolución original para alinear los resultados y conservar
+la escala del cálculo de ancho. Las salidas de diagnóstico `_rocks` usan
+la resolución normalizada.
+
+El pipeline selecciona únicamente la máscara de segmentación con mayor
+confianza, sin umbral mínimo, y conserva
 todas las rocas devueltas por YOLO con confianza de 0,30 y grilla 2×3.
 El detector de rocas entrega cajas, no máscaras de instancia: una alarma significa
 que al menos un píxel de su caja intersecta la máscara del camino. Esto puede
@@ -164,6 +172,17 @@ Ejecutar `sudo systemctl daemon-reload` y luego
 `sudo systemctl enable --now neumavision-inference.service`.
 Consultar el arranque con `sudo journalctl -u neumavision-inference -n 50`.
 
+Para ver la duración por foto mientras se procesa una misión en Jade:
+
+```bash
+sudo journalctl -u neumavision-inference -f
+```
+
+Cada imagen registra en segundos la inferencia (segmentación, detección,
+postprocesado y escritura de resultados) y la espera para acceder a los modelos.
+El cálculo del ancho de pista se registra aparte. Estos tiempos se miden en
+Jade y excluyen el arranque de EC2 y la transferencia entre Nina y Jade.
+
 ### Nina
 
 Nina solicita a Jade la medición de ancho mediante `include_road_width=true`
@@ -203,10 +222,13 @@ Actualizar Jade primero y luego Nina. En modo remoto, Nina solicita el ancho
 en `POST /predict` con el campo multipart `include_road_width=true`. Puede
 enviar `DEFAULT_GSD_CM_PX` como `default_gsd_cm_px` si falta la escala EXIF.
 Jade devuelve `road_width.summary` y `road_width.overlay_jpeg` cuando logra
-medir el camino. Jade calcula el eje a media resolución y proyecta el resultado
-a la foto original. Con GSD disponible, repite a resolución completa si la
-medición reducida falla o si su percentil 10 queda a menos de un 5 % de un
-umbral de criticidad. Nina guarda el JSON y el JPEG que usa el visor. Los clientes
+medir el camino. Jade mide a media resolución y proyecta el resultado a la
+foto original. Para trazar el eje usa una copia reducida de la máscara cuando
+su tamaño y el ancho del camino lo permiten. Los radios se leen de la
+transformada de distancia a la resolución de medición. Con GSD disponible,
+repite a resolución completa si la medición reducida falla o si su percentil 10
+queda a menos de un 5 % de un umbral de criticidad. Nina guarda el JSON y el JPEG
+que usa el visor. Los clientes
 anteriores siguen recibiendo la máscara PNG y pueden medir en Nina.
 
 ### Encendido bajo demanda y resultados en S3

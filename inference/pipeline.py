@@ -10,6 +10,8 @@ from detection import BASE_DIR, WEIGHTS, run as detect_rocks
 from postprocessing import cross_detections
 from segmentation import predict_road
 
+MAX_INFERENCE_SIDE = 3840
+
 ROAD_LABELS = {
     1: "Camino en buen estado",
     2: "Camino con material pedregoso",
@@ -21,8 +23,28 @@ def run(image_path: Path, output: Path, confidence: float = 0.30,
     image = cv2.imread(str(image_path))
     if image is None:
         raise ValueError(f"No se pudo leer la imagen: {image_path}")
-    mask, selected = predict_road(image)
-    result = detect_rocks(image_path, WEIGHTS, output, confidence, 1280)
+    height, width = image.shape[:2]
+    inference_image = image
+    if max(width, height) > MAX_INFERENCE_SIDE:
+        scale = MAX_INFERENCE_SIDE / max(width, height)
+        size = (max(1, round(width * scale)), max(1, round(height * scale)))
+        inference_image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+
+    mask, selected = predict_road(inference_image)
+    result = detect_rocks(image_path, WEIGHTS, output, confidence, 1280,
+                          image=inference_image)
+    if inference_image is not image:
+        scale_x = width / result["width"]
+        scale_y = height / result["height"]
+        for detection in result["detections"]:
+            x1, y1, x2, y2 = detection["bbox"]
+            detection["bbox"] = [x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y]
+        for tile in result["tiles"]:
+            left, top, right, bottom = tile["bbox"]
+            tile["bbox"] = [round(left * scale_x), round(top * scale_y),
+                            round(right * scale_x), round(bottom * scale_y)]
+        result.update(width=width, height=height)
+        mask = cv2.resize(mask, (width, height), interpolation=cv2.INTER_NEAREST)
     result["detections"] = cross_detections(result["detections"], mask, selected is not None)
     alarm_count = sum(item["alarm"] is True for item in result["detections"])
     result.update({

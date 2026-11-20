@@ -53,7 +53,8 @@ def tile_bounds(width: int, height: int, rows: int, columns: int):
 
 def run(image_path: Path, weights: Path, output: Path, confidence: float,
         imgsz: int, device: str | None = None,
-        rows: int = 2, columns: int = 3, max_det: int = 600) -> dict:
+        rows: int = 2, columns: int = 3, max_det: int = 600,
+        *, image=None) -> dict:
     if not image_path.is_file():
         raise FileNotFoundError(f"No se encontro la imagen: {image_path}")
     if not 0 <= confidence <= 1:
@@ -65,14 +66,15 @@ def run(image_path: Path, weights: Path, output: Path, confidence: float,
 
     import cv2
 
-    image = cv2.imread(str(image_path))
+    if image is None:
+        image = cv2.imread(str(image_path))
     if image is None:
         raise ValueError(f"Imagen invalida: {image_path}")
     height, width = image.shape[:2]
     bounds = list(tile_bounds(width, height, rows, columns))
     if (width, height) != (3840, 2160) and (rows, columns) == (2, 3):
         print(f"Aviso: imagen {width}x{height}; los tiles no seran 1280x1080. "
-              "Se conserva la resolucion original antes del letterbox.")
+              "Se usa el tamaño indicado antes del letterbox.")
     model = load_rock_model(weights)
     detections = []
     tiles = []
