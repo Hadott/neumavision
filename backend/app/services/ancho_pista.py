@@ -142,6 +142,40 @@ def eje_principal(sk):
     return ys[camino], xs[camino]
 
 
+# Lado maximo (px) de la mascara con que se calcula el esqueleto. El esqueleto a
+# resolucion completa tardaba ~50 s por imagen 4K; reducido tarda <1 s.
+LADO_ESQUELETO = 1600
+
+
+def eje_rapido(mp, radio_max):
+    """Eje central ordenado a resolucion completa, calculado sobre una copia reducida
+    de la mascara. Solo el trazado del eje usa la copia reducida: los radios (anchos)
+    se leen despues de la transformada de distancia a resolucion completa."""
+    H, W = mp.shape
+    f = max(1, int(np.ceil(max(H, W) / LADO_ESQUELETO)))
+    f = min(f, max(1, int(radio_max // 8)))  # la pista reducida conserva >= 16 px de ancho
+    if f == 1:
+        return eje_principal(skeletonize(mp.astype(bool)))
+    hs, ws = -(-H // f), -(-W // f)
+    mpar = cv2.copyMakeBorder(mp, 0, hs * f - H, 0, ws * f - W, cv2.BORDER_REPLICATE)
+    chica = cv2.resize(mpar.astype(np.float32), (ws, hs), interpolation=cv2.INTER_AREA) >= 0.5
+    ys, xs = eje_principal(skeletonize(chica))
+    if len(ys) < 2:
+        return ys, xs
+    # centros de los pixeles reducidos, en coordenadas de resolucion completa
+    Y, X = ys * f + (f - 1) / 2, xs * f + (f - 1) / 2
+    # densificar a pasos de 1 px, como un esqueleto de resolucion completa
+    pasos = np.maximum(np.abs(np.diff(Y)), np.abs(np.diff(X))).astype(int)
+    pasos = np.maximum(pasos, 1)
+    t = np.concatenate([np.arange(n) / n + k for k, n in enumerate(pasos)] + [[len(pasos)]])
+    Yd = np.rint(np.interp(t, np.arange(len(Y)), Y)).astype(np.int64)
+    Xd = np.rint(np.interp(t, np.arange(len(X)), X)).astype(np.int64)
+    Yd, Xd = np.clip(Yd, 0, H - 1), np.clip(Xd, 0, W - 1)
+    nuevo = np.ones(len(Yd), bool)
+    nuevo[1:] = (np.diff(Yd) != 0) | (np.diff(Xd) != 0)
+    return Yd[nuevo], Xd[nuevo]
+
+
 def medir(m, escala_px=1):
     """Eje central ordenado, radio (px), validez y normal de cada punto.
     La mascara se extiende fuera de la foto (relleno replicado) para que el eje
@@ -150,7 +184,7 @@ def medir(m, escala_px=1):
     pad = max(h, w) // 2
     mp = cv2.copyMakeBorder(m, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
     dt = cv2.distanceTransform(mp, cv2.DIST_L2, 5)
-    ys, xs = eje_principal(skeletonize(mp.astype(bool)))
+    ys, xs = eje_rapido(mp, dt[pad:pad + h, pad:pad + w].max())
     r = dt[ys, xs].astype(float)
     ys, xs = ys - pad, xs - pad
     N = len(ys)
