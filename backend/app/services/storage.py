@@ -83,7 +83,7 @@ def _restore_original(mission_id: str, path: Path) -> None:
             finally:
                 temporary.unlink(missing_ok=True)
     except OSError as error:
-        raise AnalysisStorageError("No se pudo preparar la imagen original en Nina.") from error
+        raise AnalysisStorageError("No se pudo preparar la imagen original en la plataforma.") from error
 
 
 @contextmanager

@@ -39,6 +39,7 @@ export type RoadWidth = {
   eje_medible_pct: number;
   confianza_pista?: number | null;
   clase_pista?: string | null;
+  resumen_incrustado?: boolean;
 };
 
 export type Mission = {

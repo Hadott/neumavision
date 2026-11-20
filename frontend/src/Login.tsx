@@ -1,4 +1,4 @@
-import { ArrowRight, BarChart3, FileText, LoaderCircle, Lock, Mail, MapPin, TriangleAlert } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { FormEvent, useState } from "react";
 
@@ -48,9 +48,9 @@ export default function Login({ onLogin }: { onLogin: (session: Session) => void
             <p>Revisa los hallazgos detectados por el dron en los caminos de tu faena, su criticidad y su ubicación en el mapa.</p>
           </div>
           <ul>
-            <li><i><BarChart3 size={14} /></i>Hallazgos clasificados por criticidad</li>
-            <li><i><MapPin size={14} /></i>Mapa georreferenciado de cada anomalía</li>
-            <li><i><FileText size={14} /></i>Informes descargables</li>
+            <li>Hallazgos clasificados por criticidad</li>
+            <li>Mapa georreferenciado de cada anomalía</li>
+            <li>Informes descargables</li>
           </ul>
         </motion.div>
 
@@ -65,26 +65,24 @@ export default function Login({ onLogin }: { onLogin: (session: Session) => void
           <h2>Inicia sesión</h2>
           <p className="login-sub">Ingresa con las credenciales entregadas por NeumaDiesel.</p>
 
-          {error && <div className="login-error"><TriangleAlert size={15} /> {error}</div>}
+          {error && <div className="login-error">{error}</div>}
 
           <label>
             <span>Correo electrónico</span>
             <div className="login-input">
-              <Mail size={15} />
               <input type="email" autoComplete="username" required value={correo} onChange={(event) => setCorreo(event.target.value)} placeholder="nombre@empresa.cl" />
             </div>
           </label>
           <label>
             <span>Contraseña</span>
             <div className="login-input">
-              <Lock size={15} />
               <input type={showPassword ? "text" : "password"} autoComplete="current-password" required value={contrasena} onChange={(event) => setContrasena(event.target.value)} />
               <button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Ocultar" : "Mostrar"}</button>
             </div>
           </label>
 
           <button className="button primary full large" type="submit" disabled={busy}>
-            {busy ? <LoaderCircle className="spin" size={16} /> : <>Ingresar <ArrowRight size={16} /></>}
+            {busy ? <LoaderCircle className="spin" size={16} /> : "Ingresar"}
           </button>
           <p className="login-help">¿Olvidaste tu contraseña? Contacta al administrador de NeumaDiesel.</p>
         </motion.form>

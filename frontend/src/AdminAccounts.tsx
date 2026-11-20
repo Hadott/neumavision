@@ -1,4 +1,4 @@
-import { Eye, EyeOff, LoaderCircle, Mail, Save, Shield, Users, KeyRound, AlertTriangle, UserPlus } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
 import { api } from "./api";
@@ -61,10 +61,9 @@ function AccountCard({
   return (
     <article className="card admin-account-card">
       <header className="admin-account-header">
-        <span className="admin-account-icon"><Users size={17} /></span>
         <div>
           <strong>{account.nombre}</strong>
-          <span className="admin-account-role"><Shield size={12} /> {account.rol === "admin" ? "Administrador" : "Faena"}</span>
+          <span className="admin-account-role">{account.rol === "admin" ? "Administrador" : "Faena"}</span>
         </div>
       </header>
 
@@ -79,7 +78,7 @@ function AccountCard({
         </label>
         <div className="admin-account-actions">
           <button className="button primary" type="submit" disabled={busy !== null}>
-            {busy === "profile" ? <LoaderCircle className="spin" size={14} /> : <Save size={14} />}
+            {busy === "profile" ? <LoaderCircle className="spin" size={14} /> : null}
             Guardar datos
           </button>
           <button className="button ghost" type="button" onClick={() => onViewMissions(account)}>
@@ -89,7 +88,7 @@ function AccountCard({
       </form>
 
       <form className="admin-password-form" onSubmit={resetPassword}>
-        <strong><KeyRound size={14} /> Restablecer contraseña</strong>
+        <strong>Restablecer contraseña</strong>
         <p>La contraseña anterior no se puede consultar. Asigna una nueva de al menos 8 caracteres.</p>
         <label>
           <span>Nueva contraseña temporal</span>
@@ -121,12 +120,12 @@ function AccountCard({
           />
         </label>
         <button className="button ghost" type="submit" disabled={busy !== null}>
-          {busy === "password" ? <LoaderCircle className="spin" size={14} /> : <KeyRound size={14} />}
+          {busy === "password" ? <LoaderCircle className="spin" size={14} /> : null}
           Asignar contraseña nueva
         </button>
       </form>
-      {error && <div className="admin-account-message error"><AlertTriangle size={14} />{error}</div>}
-      {success && <div className="admin-account-message success"><Mail size={14} />{success}</div>}
+      {error && <div className="admin-account-message error">{error}</div>}
+      {success && <div className="admin-account-message success">{success}</div>}
     </article>
   );
 }
@@ -158,10 +157,9 @@ export default function AdminAccounts({ onViewMissions }: { onViewMissions: (acc
         <p>Crea cuentas de faena, actualiza sus datos, revisa las misiones asignadas o establece una contraseña nueva.</p>
       </header>
       <div className="admin-security-note">
-        <Shield size={16} />
         Las contraseñas se guardan como hash y no se pueden recuperar. Al crear o restablecer una, entrégala por un canal privado.
       </div>
-      {error && <div className="admin-account-message error"><AlertTriangle size={14} />{error}</div>}
+      {error && <div className="admin-account-message error">{error}</div>}
       {loading ? (
         <div className="admin-accounts-loading"><LoaderCircle className="spin" size={18} /> Cargando cuentas…</div>
       ) : (
@@ -219,7 +217,7 @@ function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => voi
 
   return (
     <form className="card admin-create-account" onSubmit={createAccount}>
-      <header><span className="admin-account-icon"><UserPlus size={17} /></span><div><strong>Crear cuenta de faena</strong><span>Se asignará el rol de usuario de faena.</span></div></header>
+      <header><div><strong>Crear cuenta de faena</strong><span>Se asignará el rol de usuario de faena.</span></div></header>
       <div className="admin-create-fields">
         <label><span>Nombre de la faena</span><input required minLength={1} maxLength={120} value={nombre} onChange={(event) => setNombre(event.target.value)} /></label>
         <label><span>Correo de acceso</span><input required type="email" maxLength={255} value={correo} onChange={(event) => setCorreo(event.target.value)} /></label>
@@ -236,11 +234,11 @@ function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => voi
       </div>
       <div className="admin-create-submit">
         <button className="button primary" type="submit" disabled={busy}>
-          {busy ? <LoaderCircle className="spin" size={14} /> : <UserPlus size={14} />} Crear cuenta
+          {busy ? <LoaderCircle className="spin" size={14} /> : null} Crear cuenta
         </button>
       </div>
-      {error && <div className="admin-account-message error"><AlertTriangle size={14} />{error}</div>}
-      {success && <div className="admin-account-message success"><Mail size={14} />{success}</div>}
+      {error && <div className="admin-account-message error">{error}</div>}
+      {success && <div className="admin-account-message success">{success}</div>}
     </form>
   );
 }

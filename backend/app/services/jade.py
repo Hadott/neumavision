@@ -118,7 +118,7 @@ class Jade:
             if state == "running" and not self.stop_requested and self.service_ready():
                 return
             sleep(min(3, max(0, deadline - monotonic())))
-        raise JadeUnavailable("Jade no estuvo lista a tiempo. Puedes reintentar el procesamiento.")
+        raise JadeUnavailable("El servicio de inferencia no estuvo listo a tiempo. Puedes reintentar el procesamiento.")
 
     @contextmanager
     def mission(self, mission_id: str):

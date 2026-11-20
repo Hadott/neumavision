@@ -1,4 +1,3 @@
-import { AlertTriangle, CheckCircle2, Clock, Download, Gauge, Repeat, ShieldCheck, Timer, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
@@ -197,10 +196,10 @@ export default function DashboardStats({ findings }: { findings: DashboardFindin
   const endLabelY = spreadLabels(CRITS.map((key) => ({ key, y: lineY(lastDay[key]) })));
 
   const kpis = [
-    { key: "total", title: "Hallazgos totales", icon: <Gauge size={19} />, color: "#4c5962", bg: "#edf0f1", value: currentCounts.total, prev: previousCounts.total },
-    { key: "critico", title: "Críticos", icon: <AlertTriangle size={19} />, color: criticalityColor.critico, bg: "#fff1ef", value: currentCounts.critico, prev: previousCounts.critico },
-    { key: "moderado", title: "Moderados", icon: <Clock size={19} />, color: criticalityColor.moderado, bg: "#fef3c7", value: currentCounts.moderado, prev: previousCounts.moderado },
-    { key: "optimo", title: "Óptimos / leves", icon: <CheckCircle2 size={19} />, color: criticalityColor.optimo, bg: "#e2f6f2", value: currentCounts.optimo, prev: previousCounts.optimo }
+    { key: "total", title: "Hallazgos totales", color: "#4c5962", value: currentCounts.total, prev: previousCounts.total },
+    { key: "critico", title: "Críticos", color: criticalityColor.critico, value: currentCounts.critico, prev: previousCounts.critico },
+    { key: "moderado", title: "Moderados", color: criticalityColor.moderado, value: currentCounts.moderado, prev: previousCounts.moderado },
+    { key: "optimo", title: "Óptimos / leves", color: criticalityColor.optimo, value: currentCounts.optimo, prev: previousCounts.optimo }
   ];
 
   return (
@@ -241,7 +240,6 @@ export default function DashboardStats({ findings }: { findings: DashboardFindin
           const delta = variation(item.value, item.prev);
           return (
             <div key={item.key} className="card kpi-card">
-              <span className="kpi-icon" style={{ background: item.bg, color: item.color }}>{item.icon}</span>
               <span>
                 <small className="stats-kpi-title">{item.title}</small>
                 <strong style={{ color: item.key === "total" ? "var(--ink)" : item.color }}><AnimatedNumber value={item.value} /></strong>
@@ -388,23 +386,23 @@ export default function DashboardStats({ findings }: { findings: DashboardFindin
           <div className="stats-head"><div><h3>Indicadores de gestión</h3><small>Seguimiento de reparación y revisión · {currentLabel}</small></div></div>
           <div className="mgmt">
             <div className="mgmt-item">
-              <span><Wrench size={13} /> Avance de reparación</span>
+              <span>Avance de reparación</span>
               <strong>{current.length ? Math.round((management.repaired / current.length) * 100) : 0}%</strong>
               <small>{management.repaired} de {current.length} hallazgos reparados</small>
               <div className="repair-bar"><span style={{ width: `${current.length ? (management.repaired / current.length) * 100 : 0}%` }} /></div>
             </div>
             <div className="mgmt-item">
-              <span><Timer size={13} /> Tiempo promedio de respuesta</span>
+              <span>Tiempo promedio de respuesta</span>
               <strong>{management.responseDays === null ? "—" : `${management.responseDays.toFixed(1).replace(".", ",")} días`}</strong>
               <small>{management.responseDays === null ? "Se calcula al marcar hallazgos como reparados" : "desde la detección hasta la reparación"}</small>
             </div>
             <div className="mgmt-item">
-              <span><Repeat size={13} /> Tramos recurrentes</span>
+              <span>Tramos recurrentes</span>
               <strong>{management.recurrent.length}</strong>
               <small title={management.recurrent.join(", ")}>{management.recurrent.length ? management.recurrent.slice(0, 2).join(", ") + (management.recurrent.length > 2 ? "…" : "") : `con hallazgos en 3 o más días (últimos ${trendDays})`}</small>
             </div>
             <div className="mgmt-item">
-              <span><ShieldCheck size={13} /> Hallazgos confirmados</span>
+              <span>Hallazgos confirmados</span>
               <strong>{current.length ? Math.round((management.confirmed / current.length) * 100) : 0}%</strong>
               <small>{management.confirmed} confirmados · {current.length - management.confirmed} pendientes de revisión</small>
               <div className="repair-bar dark"><span style={{ width: `${current.length ? (management.confirmed / current.length) * 100 : 0}%` }} /></div>
@@ -416,7 +414,7 @@ export default function DashboardStats({ findings }: { findings: DashboardFindin
       <div className="card">
         <div className="stats-head">
           <div><h3>Hallazgos del período</h3><small>{current.length} hallazgos · {currentLabel}</small></div>
-          <button className="button ghost" disabled={!current.length} onClick={() => exportCsv(table, `hallazgos-${selected}.csv`)}><Download size={14} /> Exportar CSV</button>
+          <button className="button ghost" disabled={!current.length} onClick={() => exportCsv(table, `hallazgos-${selected}.csv`)}> Exportar CSV</button>
         </div>
         <div className="stats-body">
           {table.length ? (

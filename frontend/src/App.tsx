@@ -1,36 +1,9 @@
 import {
-  AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
-  Calendar,
   Check,
-  CheckCircle2,
   ChevronDown,
-  CircleDot,
-  Clock,
-  Download,
-  FileImage,
-  FileText,
-  Gauge,
-  History,
-  ImagePlus,
-  LayoutDashboard,
   LoaderCircle,
-  LogOut,
-  MapPin,
-  Mountain,
-  Play,
-  RotateCcw,
-  ScanLine,
-  ShieldCheck,
-  SlidersHorizontal,
   Trash2,
-  Upload,
-  UsersRound,
-  Wrench,
   X,
-  XCircle,
-  Ruler,
   ZoomIn,
   ZoomOut
 } from "lucide-react";
@@ -43,7 +16,7 @@ import DashboardStats from "./DashboardStats";
 import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
 import Login from "./Login";
 import MapPanel from "./MapPanel";
-import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, RoadWidth, Session } from "./types";
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
@@ -102,6 +75,59 @@ const widthClass = (estado: string) => {
   return "sin";
 };
 const confidence = (value: number) => `${Math.round(value * 100)}%`;
+
+function RoadWidthCard({ width }: { width: RoadWidth }) {
+  // Umbrales de la tarjeta original para un Komatsu 830E de 7,3 m.
+  const critical = 3 * 7.3;
+  const optimal = 3.5 * 7.3;
+  const minimum = width.ancho_min_m;
+  const format = (value: number, decimals = 1) => value.toFixed(decimals).replace(".", ",");
+  const marker = minimum == null ? null
+    : minimum < critical ? 40 * minimum / critical
+    : minimum < optimal ? 40 + 25 * (minimum - critical) / (optimal - critical)
+    : Math.min(65 + 35 * (minimum - optimal) / (optimal * 0.4), 100);
+
+  return (
+    <section className="road-width-summary" aria-labelledby="road-width-title">
+      <div className="road-width-summary-heading">
+        <h2 id="road-width-title">Ancho de pista</h2>
+        <span className={`width-badge ${widthClass(width.estado)}`}>{width.estado}</span>
+      </div>
+      <div className="road-width-measurement">
+        <strong>{minimum == null ? "—" : `${format(minimum)} m`}</strong>
+        <span>ancho mínimo del tramo</span>
+      </div>
+      <div className="road-width-scale" aria-label={`Umbrales de ancho: ${format(critical)} y ${format(optimal)} metros`}>
+        {marker != null && <i aria-hidden="true" style={{ left: `${marker}%` }} />}
+        <span>{format(critical)}</span>
+        <span>{format(optimal)}</span>
+      </div>
+      <div className="road-width-details">
+        <p>Mediano: {width.ancho_mediano_m == null ? "—" : `${format(width.ancho_mediano_m)} m`} · Eje medido: {format(width.eje_medible_pct, 0)} %</p>
+        <p>GSD: {width.gsd_cm_px == null ? "desconocido" : `${format(width.gsd_cm_px, 2)} cm/px (${width.fuente_gsd})`} · Komatsu 830E</p>
+      </div>
+    </section>
+  );
+}
+
+function LegacyRoadWidthPatch({ image }: { image: MissionImage }) {
+  // La tarjeta antigua se dibujaba en la esquina inferior izquierda a escala
+  // 0,72 × ancho / 1536. Restauramos esa zona con los píxeles de la foto original.
+  const scale = (image.width / 1536) * 0.72;
+  const padding = 4;
+  const left = Math.max(0, 24 * scale - padding);
+  const right = Math.max(0, image.width - 388 * scale - padding);
+  const top = Math.max(0, image.height - 238 * scale - padding);
+  const bottom = Math.max(0, 18 * scale - padding);
+  return (
+    <img
+      className="legacy-road-width-patch"
+      src={api.imageUrl(image.image_url)}
+      alt=""
+      style={{ clipPath: `inset(${top / image.height * 100}% ${right / image.width * 100}% ${bottom / image.height * 100}% ${left / image.width * 100}%)` }}
+    />
+  );
+}
 
 function ReviewImageZoom({ image, children }: { image: MissionImage; children: ReactNode }) {
   const [zoom, setZoom] = useState(100);
@@ -641,10 +667,10 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-icon"><img src={logoIcon} alt="NeumaDiesel" /></span>
+        <button type="button" className="brand brand-button" onClick={goToHistory} aria-label="NeumaDiesel, ir al historial de misiones" title="Historial de misiones">
+          <span className="brand-icon"><img src={logoIcon} alt="" /></span>
           <span><strong>NEUMADIESEL</strong><small>Visión de caminos</small></span>
-        </div>
+        </button>
         <div className="top-actions">
           {isAdmin && (
             <select className="faena-select" value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)} title="Faena visible">
@@ -652,27 +678,27 @@ export default function App() {
               {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
             </select>
           )}
-          {screen !== "history" && <button className="button ghost" onClick={goToHistory}><History size={15} /> Historial</button>}
-          {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}><LayoutDashboard size={15} /> Dashboard</button>}
-          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => setScreen("accounts")}><UsersRound size={15} /> Cuentas</button>}
-          {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
-          {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}><RotateCcw size={15} /> Nueva misión</button>}
+          {screen !== "history" && <button className="button ghost" onClick={goToHistory}>Historial</button>}
+          {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}>Dashboard</button>}
+          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => setScreen("accounts")}> Cuentas</button>}
+          {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
+          {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
           <span className="account-chip" title={session.cuenta.correo}>
             <i>{session.cuenta.nombre.split(/\s+/).map((word) => word[0]).join("").slice(0, 3).toUpperCase()}</i>
             <span><strong>{session.cuenta.nombre}</strong><small>{isAdmin ? "Administrador" : session.cuenta.correo}</small></span>
           </span>
-          <button className="button ghost" onClick={() => logout()}><LogOut size={15} /> Cerrar sesión</button>
+          <button className="button ghost" onClick={() => logout()}> Cerrar sesión</button>
         </div>
       </header>
 
       <div className="inference-health" role="status">
         <strong><span className={`inference-indicator ${inferenceHealth?.status ?? "unknown"}`} aria-hidden="true" />
-          Jade · {inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
+          Servicio de inferencia · {inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
         </strong>
         {inferenceHealth?.idle_timeout_seconds != null && (
           <small>
             {inferenceHealth.status === "starting"
-              ? "Jade está iniciando y cargando los modelos. Puede tardar unos minutos."
+              ? "El servicio de inferencia está iniciando y cargando los modelos. Puede tardar unos minutos."
               : inferenceHealth.idle_timeout_seconds === 0
                 ? "Apagado automático desactivado."
                 : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
@@ -689,7 +715,7 @@ export default function App() {
               <h1>Usuarios y faenas</h1>
               <p>Administra los datos de acceso y revisa las misiones de cada cuenta.</p>
             </div>
-            <div className="architecture"><span><ShieldCheck size={14} /> Solo administradores</span></div>
+            <div className="architecture"><span>Solo administradores</span></div>
           </section>
           <AdminAccounts onViewMissions={viewAccountMissions} />
         </motion.div>
@@ -704,16 +730,16 @@ export default function App() {
             </div>
           </section>
 
-          {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
+          {error && <div className="error-banner"><span>{error}</span><button aria-label="Cerrar aviso" onClick={() => setError("")}><X size={15} /></button></div>}
 
           <section className="workspace history-layout">
             <div className="history-toolbar">
               <div><span className="overline">Misiones</span><h2>{missions.length} registradas</h2></div>
               <div className="history-toolbar-actions">
                 <button className="button ghost" onClick={refreshMissions} disabled={missionsLoading}>
-                  {missionsLoading ? <LoaderCircle className="spin" size={15} /> : <RotateCcw size={15} />} Actualizar
+                  {missionsLoading ? <LoaderCircle className="spin" size={15} /> : null} Actualizar
                 </button>
-                <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
+                <button className="button primary" onClick={startNewMission}>Nueva misión</button>
               </div>
             </div>
 
@@ -746,15 +772,15 @@ export default function App() {
                     </button>
                     <div className="history-card-top">
                       <span className={`status-badge ${item.status}`}>{statusLabel(item.status)}</span>
-                      <span className="history-date"><Calendar size={12} /> {formatDate(item.created_at)}</span>
+                      <span className="history-date">{formatDate(item.created_at)}</span>
                     </div>
                     <h3>{item.name}</h3>
-                    {isAdmin && item.faena_name && <span className="history-faena"><Mountain size={11} /> {item.faena_name}</span>}
+                    {isAdmin && item.faena_name && <span className="history-faena">{item.faena_name}</span>}
                     <p>{item.segment}</p>
                     <div className="history-card-stats">
-                      <span><FileImage size={13} /> {item.image_count} imágenes</span>
-                      <span><ScanLine size={13} /> {item.detection_count} hallazgos</span>
-                      <span><CheckCircle2 size={13} /> {item.confirmed_count} confirmados</span>
+                      <span>{item.image_count} imágenes</span>
+                      <span>{item.detection_count} hallazgos</span>
+                      <span>{item.confirmed_count} confirmados</span>
                     </div>
                     {(item.criticidad_critico_count + item.criticidad_moderado_count + item.criticidad_optimo_count) > 0 && (
                       <div className="history-card-semaphore">
@@ -763,16 +789,15 @@ export default function App() {
                         {item.criticidad_optimo_count > 0 && <span className="mini-crit-chip optimo"><i />{item.criticidad_optimo_count}</span>}
                       </div>
                     )}
-                    <span className="history-open">Abrir misión <ArrowRight size={13} /></span>
+                    <span className="history-open">Abrir misión </span>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="card history-empty">
-                <Mountain size={22} />
                 <strong>Todavía no hay misiones</strong>
                 <span>Crea una misión nueva cargando imágenes de inspección.</span>
-                <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
+                <button className="button primary" onClick={startNewMission}>Nueva misión</button>
               </div>
             )}
           </section>
@@ -789,21 +814,20 @@ export default function App() {
             </div>
           </section>
 
-          {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
+          {error && <div className="error-banner"><span>{error}</span><button aria-label="Cerrar aviso" onClick={() => setError("")}><X size={15} /></button></div>}
 
           <nav className="steps">
-            <button className={dashTab === "mapa" ? "active" : ""} onClick={() => setDashTab("mapa")}><MapPin size={14} /> Mapa</button>
-            <button className={dashTab === "estadisticas" ? "active" : ""} onClick={() => setDashTab("estadisticas")}><Gauge size={14} /> Estadísticas</button>
+            <button className={dashTab === "mapa" ? "active" : ""} onClick={() => setDashTab("mapa")}> Mapa</button>
+            <button className={dashTab === "estadisticas" ? "active" : ""} onClick={() => setDashTab("estadisticas")}> Estadísticas</button>
           </nav>
 
           {dashLoading && !dashFindings.length ? (
             <section className="workspace dash-wide"><SkeletonDashboard /></section>
           ) : !dashFindings.length ? (
             <section className="workspace"><div className="card history-empty">
-              <Mountain size={22} />
               <strong>Todavía no hay hallazgos</strong>
               <span>Procesa una misión para ver sus hallazgos en el dashboard operacional.</span>
-              <button className="button primary" onClick={startNewMission}><Upload size={16} /> Nueva misión</button>
+              <button className="button primary" onClick={startNewMission}>Nueva misión</button>
             </div></section>
           ) : dashTab === "estadisticas" ? (
             <section className="workspace dash-wide" style={{ paddingBottom: 24 }}>
@@ -818,25 +842,21 @@ export default function App() {
                 </div>
                 <div className="kpi-row">
                   <div className="card kpi-card">
-                    <span className="kpi-icon" style={{ background: "#edf0f1", color: "#4c5962" }}><Gauge size={19} /></span>
                     <span><strong><AnimatedNumber value={dashStats.total} /></strong><span>Hallazgos activos</span></span>
                   </div>
                   <div className="card kpi-card">
-                    <span className="kpi-icon" style={{ background: "#fff1ef", color: "#c0392b" }}><AlertTriangle size={19} /></span>
                     <span><strong style={{ color: "#c0392b" }}><AnimatedNumber value={dashStats.critico} /></strong><span>Críticos</span></span>
                   </div>
                   <div className="card kpi-card">
-                    <span className="kpi-icon" style={{ background: "#fef3c7", color: "#a16207" }}><Clock size={19} /></span>
                     <span><strong style={{ color: "#a16207" }}><AnimatedNumber value={dashStats.moderado} /></strong><span>Moderados</span></span>
                   </div>
                   <div className="card kpi-card">
-                    <span className="kpi-icon" style={{ background: "#e2f6f2", color: "#167d72" }}><CheckCircle2 size={19} /></span>
                     <span><strong style={{ color: "#167d72" }}><AnimatedNumber value={dashStats.optimo} /></strong><span>Óptimos / leves</span></span>
                   </div>
                 </div>
                 <div className="repair-progress">
                   <div className="repair-progress-head">
-                    <span><Wrench size={13} /> Avance de reparación</span>
+                    <span>Avance de reparación</span>
                     <strong><AnimatedNumber value={dashStats.repaired} /> de <AnimatedNumber value={dashStats.total} /> reparados · {dashStats.total ? Math.round((dashStats.repaired / dashStats.total) * 100) : 0}%</strong>
                   </div>
                   <div className="repair-bar"><span style={{ width: `${dashStats.total ? (dashStats.repaired / dashStats.total) * 100 : 0}%` }} /></div>
@@ -847,7 +867,6 @@ export default function App() {
                 <aside className="card filters-card">
                   <div className="card-title compact">
                     <div><span className="overline">Filtros</span><h2>Hallazgos</h2></div>
-                    <SlidersHorizontal size={18} />
                   </div>
 
                   <div className="filter-group">
@@ -920,15 +939,14 @@ export default function App() {
                   </div>
 
                   <div className="stats-mini">
-                    <div><ScanLine size={15} /><span>Visibles</span><strong><AnimatedNumber value={dashVisible.length} /></strong></div>
-                    <div><Mountain size={15} /><span>Misiones</span><strong><AnimatedNumber value={dashMissionOptions.length} /></strong></div>
+                    <div><span>Visibles</span><strong><AnimatedNumber value={dashVisible.length} /></strong></div>
+                    <div><span>Misiones</span><strong><AnimatedNumber value={dashMissionOptions.length} /></strong></div>
                   </div>
                 </aside>
 
                 <div className="card dash-map-card">
                   <div className="dash-map-heading">
                     <div>
-                      <MapPin size={16} style={{ marginTop: 1 }} />
                       <span><strong>Mapa de hallazgos</strong><small>Sectores del camino con anomalías detectadas</small></span>
                     </div>
                     <span className="pill">{dashVisible.length} en vista</span>
@@ -937,7 +955,7 @@ export default function App() {
                     <span className="legend-chip" style={{ background: "#fff1ef", color: "#8f3f31" }}><i style={{ background: "#c0392b" }} />Crítico · <AnimatedNumber value={dashVisibleCritico} /></span>
                     <span className="legend-chip" style={{ background: "#fef3c7", color: "#a16207" }}><i style={{ background: "#a16207" }} />Moderado · <AnimatedNumber value={dashVisibleModerado} /></span>
                     <span className="legend-chip" style={{ background: "#e2f6f2", color: "#167d72" }}><i style={{ background: "#167d72" }} />Óptimo · <AnimatedNumber value={dashVisibleOptimo} /></span>
-                    <span className="legend-chip" style={{ background: "#eef2f3", color: "#4c5962" }}><Check size={9} />Reparado · <AnimatedNumber value={dashVisibleRepaired} /></span>
+                    <span className="legend-chip" style={{ background: "#eef2f3", color: "#4c5962" }}>Reparado · <AnimatedNumber value={dashVisibleRepaired} /></span>
                   </div>
                   <DashboardMap findings={dashVisible} selectedId={dashSelectedId} onSelect={(finding) => setDashSelectedId(finding.id)} />
                 </div>
@@ -961,26 +979,21 @@ export default function App() {
 
                         <div className="status-pills">
                           <span className="status-pill" style={{ background: selectedFinding.review_status === "confirmed" ? "#e2f6f2" : "#fef3c7", color: selectedFinding.review_status === "confirmed" ? "#167d72" : "#a16207" }}>
-                            {selectedFinding.review_status === "confirmed" ? <Check size={9} /> : <CircleDot size={9} />}
                             {selectedFinding.review_status === "confirmed" ? "Confirmado" : "Pendiente de revisión"}
                           </span>
                           <span className="status-pill" style={{ background: selectedFinding.repair_status === "repaired" ? "#e2f6f2" : "#fef3c7", color: selectedFinding.repair_status === "repaired" ? "#167d72" : "#a16207" }}>
-                            {selectedFinding.repair_status === "repaired" ? <Wrench size={9} /> : <Clock size={9} />}
                             {selectedFinding.repair_status === "repaired" ? "Reparado" : "Pendiente de reparación"}
                           </span>
                         </div>
 
                         <div className="detail-rows">
                           <div className="detail-row">
-                            <MapPin size={14} />
                             <div><span className="field-label">Coordenadas</span><strong className="field-value">{selectedFinding.latitude !== null ? `${selectedFinding.latitude.toFixed(6)}, ${selectedFinding.longitude?.toFixed(6)}` : "Sin coordenadas EXIF"}</strong></div>
                           </div>
                           <div className="detail-row">
-                            <Calendar size={14} />
                             <div><span className="field-label">Detectado</span><strong className="field-value">{formatDateTime(selectedFinding.created_at)}</strong></div>
                           </div>
                           <div className="detail-row">
-                            <FileImage size={14} />
                             <div><span className="field-label">Imagen</span><strong className="field-value">{selectedFinding.image_filename}</strong></div>
                           </div>
                         </div>
@@ -997,17 +1010,16 @@ export default function App() {
                           disabled={repairBusyId === selectedFinding.id}
                           onClick={() => toggleRepairStatus(selectedFinding)}
                         >
-                          {repairBusyId === selectedFinding.id ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
+                          {repairBusyId === selectedFinding.id ? <LoaderCircle className="spin" size={14} /> : null}
                           {selectedFinding.repair_status === "repaired" ? "Marcar como pendiente" : "Marcar como reparada"}
                         </button>
                         <button className="button secondary full" onClick={() => goToFindingMission(selectedFinding)} disabled={busy === "open"}>
-                          Ver misión completa <ArrowRight size={14} />
+                          Ver misión completa
                         </button>
                       </div>
                     </>
                   ) : (
                     <div className="detail-empty">
-                      <MapPin size={22} />
                       <strong>Selecciona un punto</strong>
                       <span>Haz clic en un marcador del mapa para ver el detalle del hallazgo.</span>
                     </div>
@@ -1041,13 +1053,13 @@ export default function App() {
             ))}
           </nav>
 
-          {error && <div className="error-banner"><AlertTriangle size={16} /><span>{error}</span><button onClick={() => setError("")}><X size={15} /></button></div>}
-          {health?.detector === "mock" && view !== "upload" && <div className="error-banner"><AlertTriangle size={16} /><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
+          {error && <div className="error-banner"><span>{error}</span><button aria-label="Cerrar aviso" onClick={() => setError("")}><X size={15} /></button></div>}
+          {health?.detector === "mock" && view !== "upload" && <div className="error-banner"><span>Análisis simulado: los resultados son ficticios y no corresponden a detecciones reales.</span></div>}
 
           {busy === "upload" && (
             <section className="task-progress" aria-label="Carga de fotos">
-              <strong>{uploadProgress?.fraction === 1 ? "Guardando imágenes en Nina…" : "Subiendo imágenes a Nina…"}</strong>
-              <ProgressBar label="Datos enviados a Nina" fraction={uploadProgress?.fraction ?? 0} />
+              <strong>{uploadProgress?.fraction === 1 ? "Guardando imágenes en la plataforma…" : "Subiendo imágenes a la plataforma…"}</strong>
+              <ProgressBar label="Datos enviados a la plataforma" fraction={uploadProgress?.fraction ?? 0} />
               {uploadProgress?.remaining != null && (
                 <small>Quedan aprox. {formatDuration(uploadProgress.remaining * 1000)}</small>
               )}
@@ -1059,7 +1071,7 @@ export default function App() {
               {detectionStart?.missionId === mission.id ? (
                 <section className="task-progress" aria-label="Progreso de inferencia">
                   <strong>
-                    {detectionProgress?.phase === "starting" ? "Esperando que Jade esté lista…"
+                    {detectionProgress?.phase === "starting" ? "Esperando que el servicio de inferencia esté listo…"
                       : detectionProgress?.phase === "saving" ? "Guardando los resultados…"
                       : detectionProgress ? "Procesando imágenes…" : "Detección solicitada"}
                   </strong>
@@ -1071,14 +1083,13 @@ export default function App() {
                     {detectionProgress?.estimated_remaining_seconds != null &&
                       ` · Quedan aprox. ${formatDuration(detectionProgress.estimated_remaining_seconds * 1000)} de análisis`}
                   </small>
-                  {!detectionProgress && <small>Porcentaje pendiente de los datos de progreso de Nina.</small>}
+                  {!detectionProgress && <small>Esperando que la plataforma informe el progreso.</small>}
                   {detectionProgress?.phase === "starting" && (
-                    <small>Si Jade está apagada, encenderla y cargar los modelos puede tardar unos minutos.</small>
+                    <small>Si el servicio de inferencia está apagado, iniciarlo y cargar los modelos puede tardar unos minutos.</small>
                   )}
                 </section>
               ) : detectionSummary?.missionId === mission.id && (
                 <p className="inference-duration">
-                  <Clock size={15} />
                   <span>
                     {detectionSummary.imageCount} {detectionSummary.imageCount === 1 ? "imagen procesada" : "imágenes procesadas"}
                     {" en "}{formatDuration(detectionSummary.milliseconds)}
@@ -1117,36 +1128,34 @@ export default function App() {
                     onDrop={(event) => { event.preventDefault(); setDragging(false); acceptFiles(event.dataTransfer.files); }}
                   >
                     <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(event) => event.target.files && acceptFiles(event.target.files)} />
-                    <span className="upload-icon"><Upload size={25} /></span>
                     <strong>Arrastra las imágenes aquí</strong>
                     <small>JPG, PNG o WebP</small>
-                    <span className="button secondary"><ImagePlus size={15} /> Seleccionar archivos</span>
+                    <span className="button secondary">Seleccionar archivos</span>
                   </div>
                   {files.length > 0 && <div className="queued-files">
                     <div className="queue-head"><strong>{files.length} imágenes listas</strong><button type="button" onClick={() => setFiles([])}>Quitar todas</button></div>
-                    {files.slice(0, 4).map((file, index) => <div className="queued-file" key={`${file.name}-${index}`}><FileImage size={16} /><span>{file.name}</span><small>{(file.size / 1024 / 1024).toFixed(1)} MB</small><button type="button" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></div>)}
+                    {files.slice(0, 4).map((file, index) => <div className="queued-file" key={`${file.name}-${index}`}><span>{file.name}</span><small>{(file.size / 1024 / 1024).toFixed(1)} MB</small><button type="button" aria-label={`Quitar ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}><X size={14} /></button></div>)}
                     {files.length > 4 && <small className="more-files">+ {files.length - 4} archivos adicionales</small>}
                   </div>}
                   <div className="form-actions">
-                    <button className="button primary" disabled={busy !== null}><Upload size={16} />{busy === "upload" ? "Subiendo…" : "Crear misión"}</button>
+                    <button className="button primary" disabled={busy !== null}>{busy === "upload" ? "Subiendo…" : "Crear misión"}</button>
                   </div>
                 </> : <div className="uploaded-state">
-                  <span className="success-icon"><CheckCircle2 size={27} /></span>
                   <div><span className="overline">Carga completada</span><h3>{mission.name}</h3><p>{mission.segment} · {mission.images.length} imágenes</p></div>
                   <div className="mission-thumbs">{mission.images.slice(0, 5).map((image) => <img key={image.id} src={api.imageUrl(image.image_url)} alt="Camino cargado" />)}</div>
                 </div>}
               </form>
 
               <aside className="card process-card">
-                <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div><Gauge size={20} /></div>
+                <div className="card-title"><div><span className="overline">Procesamiento</span><h2>Flujo de detección</h2></div></div>
                 <div className="pipeline">
                   <div className={mission ? "complete" : "current"}><span>{mission ? <Check size={14} /> : "1"}</span><div><strong>Validar lote</strong><small>{mission ? `${mission.images.length} imágenes compatibles` : "Esperando imágenes"}</small></div></div>
                   <div className={busy === "detect" ? "current" : mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "2"}</span><div><strong>{health?.detector !== "mock" ? "Ejecutar detector" : "Análisis simulado"}</strong><small>{health?.detector !== "mock" ? "Modelo de detección disponible" : "Resultados ficticios; no son detecciones reales"}</small></div></div>
                   <div className={mission?.status === "review" ? "complete" : ""}><span>{mission?.status === "review" ? <Check size={14} /> : "3"}</span><div><strong>Preparar revisión</strong><small>Resultados normalizados por imagen</small></div></div>
                 </div>
-                <div className="process-note"><ShieldCheck size={16} /><span>Las misiones quedan disponibles para revisión y seguimiento.</span></div>
-                {health?.detector === "mock" && <div className="admin-account-message error"><AlertTriangle size={14} /> El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
-                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <><Play fill="currentColor" size={16} /> {health?.detector !== "mock" ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
+                <div className="process-note"><span>Las misiones quedan disponibles para revisión y seguimiento.</span></div>
+                {health?.detector === "mock" && <div className="admin-account-message error">El análisis es ficticio: los resultados no corresponden a detecciones reales.</div>}
+                <button className="button primary full large" onClick={runDetection} disabled={!mission || busy !== null}>{busy === "detect" ? <><LoaderCircle className="spin" size={17} /> Analizando imágenes…</> : <> {health?.detector !== "mock" ? "Ejecutar detección" : "Ejecutar análisis ficticio"}</>}</button>
               </aside>
             </section>
           )}
@@ -1154,7 +1163,7 @@ export default function App() {
           {view === "review" && mission && selectedImage && (
             <section className="workspace review-layout fade-in-view">
               <aside className="card filters-card">
-                <div className="card-title compact"><div><span className="overline">Filtros</span><h2>Hallazgos</h2></div><SlidersHorizontal size={18} /></div>
+                <div className="card-title compact"><div><span className="overline">Filtros</span><h2>Hallazgos</h2></div></div>
                 <div className="filter-list">
                   {availableLabels.map((label) => <button key={label} className={enabledLabels.includes(label) ? "enabled" : ""} onClick={() => toggleLabel(label)}><i style={{ background: colorForLabel[label] ?? fallbackColor }} /><span>{label}</span><strong>{imageDetections.filter((item) => item.label === label).length}</strong><em>{enabledLabels.includes(label) && <Check size={11} />}</em></button>)}
                 </div>
@@ -1164,21 +1173,24 @@ export default function App() {
                   <small><span>30%</span><span>95%</span></small>
                 </div>
                 <div className="stats-mini">
-                  <div><ScanLine size={15} /><span>Visibles</span><strong><AnimatedNumber value={visibleDetections.length} /></strong></div>
-                  <div><CircleDot size={15} /><span>Pendientes</span><strong><AnimatedNumber value={imagePending} /></strong></div>
-                  <div><CheckCircle2 size={15} /><span>Confirmadas</span><strong><AnimatedNumber value={imageConfirmed} /></strong></div>
+                  <div><span>Visibles</span><strong><AnimatedNumber value={visibleDetections.length} /></strong></div>
+                  <div><span>Pendientes</span><strong><AnimatedNumber value={imagePending} /></strong></div>
+                  <div><span>Confirmadas</span><strong><AnimatedNumber value={imageConfirmed} /></strong></div>
                 </div>
               </aside>
 
               <div className="viewer-column">
                 <div className="card viewer-card">
-                  <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><div className="image-meta-actions">{(selectedImage.road_width_url || selectedImage.analysis_url) && <div className="view-switch" role="group" aria-label="Vista de la imagen">{imageViewOptions.map((option) => <button key={option.value} type="button" className={imageView === option.value ? "active" : ""} onClick={() => setImageView(option.value)}>{option.label}</button>)}</div>}{selectedImage.road_width && <span className={`width-badge ${widthClass(selectedImage.road_width.estado)}`} title="Ancho de pista (percentil 10)"><Ruler size={13} />{selectedImage.road_width.confianza_pista != null ? `${selectedImage.road_width.clase_pista ?? "Pista"} ${confidence(selectedImage.road_width.confianza_pista)} · ` : ""}{selectedImage.road_width.ancho_min_m != null ? `${selectedImage.road_width.ancho_min_m.toFixed(1).replace(".", ",")} m` : "—"} · {selectedImage.road_width.estado}</span>}<span className="pill">{visibleDetections.length} hallazgos</span></div></div>
+                  <div className="image-meta"><div><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><div className="image-meta-actions">{(selectedImage.road_width_url || selectedImage.analysis_url) && <div className="view-switch" role="group" aria-label="Vista de la imagen">{imageViewOptions.map((option) => <button key={option.value} type="button" className={imageView === option.value ? "active" : ""} onClick={() => setImageView(option.value)}>{option.label}</button>)}</div>}<span className="pill">{visibleDetections.length} hallazgos</span></div></div>
                   <ReviewImageZoom key={selectedImage.id} image={selectedImage}>
                     <img width={selectedImage.width} height={selectedImage.height} src={api.imageUrl(imageView !== "rocas" ? (selectedImage.road_width_url ?? selectedImage.analysis_url ?? selectedImage.image_url) : selectedImage.image_url)} alt="Camino minero bajo revisión" />
+                    {imageView !== "rocas" && selectedImage.road_width_url &&
+                      selectedImage.road_width?.resumen_incrustado !== false && (
+                        <LegacyRoadWidthPatch image={selectedImage} />
+                      )}
                     {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
-                    <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
                   </ReviewImageZoom>
-                  <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{orderedImages.findIndex((image) => image.id === selectedImage.id) + 1} / {orderedImages.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
+                  <div className="viewer-nav"><button onClick={() => selectRelative(-1)}> Anterior</button><span>{orderedImages.findIndex((image) => image.id === selectedImage.id) + 1} / {orderedImages.length}</span><button onClick={() => selectRelative(1)}>Siguiente </button></div>
                 </div>
                 <section className="card mission-gallery" aria-labelledby="mission-gallery-title">
                   <div className="card-title compact">
@@ -1189,7 +1201,7 @@ export default function App() {
                     {orderedImages.map((image, index) => (
                       <button key={image.id} type="button" aria-pressed={image.id === selectedImage.id}
                         onClick={() => setSelectedImageId(image.id)} title={image.filename}>
-                        <img loading="lazy" src={api.imageUrl(image.analysis_url ?? image.road_width_url ?? image.image_url)} alt="" />
+                        <img loading="lazy" src={api.imageUrl(image.analysis_url ?? image.image_url)} alt="" />
                         <strong>{index + 1}. {image.filename}</strong>
                         <small>{image.detections.length} {image.detections.length === 1 ? "hallazgo" : "hallazgos"}</small>
                       </button>
@@ -1199,24 +1211,25 @@ export default function App() {
               </div>
 
               <aside className="card review-card">
+                {imageView !== "rocas" && selectedImage.road_width && (
+                  <RoadWidthCard width={selectedImage.road_width} />
+                )}
                 <div className="card-title compact"><div><span className="overline">Imagen actual</span><h2>Revisión</h2></div><span className="pill">{selectedImage.detections.length}</span></div>
                 <div className="detection-list">
                   {selectedImage.detections.map((item, index) => <div className={`detection-item ${item.review_status}`} key={item.id} style={{ ["--i" as string]: index } as any}>
                     <div><i style={{ background: colorForLabel[item.label] ?? fallbackColor }} /><strong>{item.label}</strong><span>{confidence(item.confidence)}</span></div>
                     <div className="confidence-line"><span style={{ width: confidence(item.confidence), background: colorForLabel[item.label] ?? fallbackColor }} /></div>
                     <span className="status-pill" style={{ marginTop: 2, background: item.review_status === "confirmed" ? "#e2f6f2" : item.review_status === "rejected" ? "#fdecea" : "#fef3c7", color: item.review_status === "confirmed" ? "#167d72" : item.review_status === "rejected" ? "#c0392b" : "#a16207" }}>
-                      {item.review_status === "confirmed" ? <Check size={9} /> : item.review_status === "rejected" ? <XCircle size={9} /> : <CircleDot size={9} />}
                       {item.review_status === "confirmed" ? "Confirmado" : item.review_status === "rejected" ? "Descartado" : "Pendiente"}
                     </span>
                   </div>)}
                 </div>
-                <button className="button primary full" onClick={() => setView("report")}><FileText size={16} /> Preparar informe</button>
+                <button className="button primary full" onClick={() => setView("report")}> Preparar informe</button>
 
                 <div className="review-criticality">
                   <div className="review-criticality-head">
-                    <span><Gauge size={13} /> Criticidad de la imagen</span>
+                    <span>Criticidad de la imagen</span>
                     <span className={`review-status-pill ${selectedImage.criticidad_manual ? "done" : "pending"}`}>
-                      {selectedImage.criticidad_manual ? <CheckCircle2 size={11} /> : <CircleDot size={11} />}
                       {selectedImage.criticidad_manual ? "Revisión realizada" : "Revisión pendiente"}
                     </span>
                   </div>
@@ -1253,20 +1266,19 @@ export default function App() {
                   <h3>Distribución de anomalías</h3>
                   <div className="bar-list">{availableLabels.map((label) => <div key={label}><span>{label}</span><div><i style={{ width: `${allDetections.length ? ((counts[label] ?? 0) / Math.max(...Object.values(counts), 1)) * 100 : 0}%`, background: colorForLabel[label] ?? fallbackColor }} /></div><strong>{counts[label] ?? 0}</strong></div>)}</div>
                   <div className="map-section">
-                    <div className="map-heading"><div><MapPin size={16} /><span><strong>Mapa de hallazgos</strong><small>Sectores del camino que requieren revisión o mantenimiento.</small></span></div><span className="pill">{mission.images.filter((image) => image.latitude !== null).length} ubicaciones</span></div>
+                    <div className="map-heading"><div><span><strong>Mapa de hallazgos</strong><small>Sectores del camino que requieren revisión o mantenimiento.</small></span></div><span className="pill">{mission.images.filter((image) => image.latitude !== null).length} ubicaciones</span></div>
                     <MapPanel mission={mission} selectedImageId={selectedImageId} onSelectImage={(image) => setSelectedImageId(image.id)} />
                   </div>
-                  <div className="report-info"><MapPin size={17} /><span><strong>Ubicación aproximada por imagen</strong><small>Las coordenadas GPS se obtienen de los metadatos EXIF cuando están disponibles.</small></span></div>
+                  <div className="report-info"><span><strong>Ubicación aproximada por imagen</strong><small>Las coordenadas GPS se obtienen de los metadatos EXIF cuando están disponibles.</small></span></div>
                 </div>
               </article>
               <aside className="card export-card">
-                <span className="export-icon"><FileText size={27} /></span>
                 <span className="overline">Exportación</span>
                 <h2>Informe listo</h2>
                 <p>El PDF se genera en FastAPI con los datos actuales de la misión y el estado de revisión.</p>
-                <div className="export-list"><span><Check size={14} /> Resumen consolidado</span><span><Check size={14} /> Conteo por clase</span><span><Check size={14} /> Detalle por imagen</span><span><Check size={14} /> Estado de cada hallazgo</span><span><Check size={14} /> Imagen de las fichas: {imageViewOptions.find((option) => option.value === imageView)?.label}</span></div>
-                <button className="button primary full large" onClick={downloadReport} disabled={busy !== null}>{busy === "report" ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />} Descargar PDF</button>
-                <button className="button secondary full" onClick={() => setView("review")}><ArrowLeft size={15} /> Volver a revisión</button>
+                <div className="export-list"><span>Resumen consolidado</span><span>Conteo por clase</span><span>Detalle por imagen</span><span>Estado de cada hallazgo</span><span>Imagen de las fichas: {imageViewOptions.find((option) => option.value === imageView)?.label}</span></div>
+                <button className="button primary full large" onClick={downloadReport} disabled={busy !== null}>{busy === "report" ? <LoaderCircle className="spin" size={17} /> : null} Descargar PDF</button>
+                <button className="button secondary full" onClick={() => setView("review")}> Volver a revisión</button>
               </aside>
             </section>
           )}

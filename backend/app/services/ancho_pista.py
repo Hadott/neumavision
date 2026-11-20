@@ -238,7 +238,7 @@ def rgb(c):  # BGR (OpenCV) -> RGB (PIL)
     return (c[2], c[1], c[0])
 
 
-def dibujar_panel(vis_bgr, estado, col, p10, med, gsd, fuente_gsd, pct, etiquetas, pista=None):
+def dibujar_panel(vis_bgr, estado, col, p10, med, gsd, fuente_gsd, pct, etiquetas, pista=None, *, mostrar_resumen=True):
     from PIL import ImageDraw
     h, w = vis_bgr.shape[:2]
     u = w / 1536                                   # unidad de escala
@@ -268,6 +268,9 @@ def dibujar_panel(vis_bgr, estado, col, p10, med, gsd, fuente_gsd, pct, etiqueta
         d.rounded_rectangle([x0, y0, x0 + tw + 16 * u, y0 + 24 * u], radius=int(12 * u),
                             fill=(255, 255, 255, 230), outline=rgb(c) + (255,), width=max(1, int(2 * u)))
         d.text((x0 + 8 * u, y0 + 3.5 * u), txt, font=f_et, fill=(40, 40, 40, 255))
+
+    if not mostrar_resumen:
+        return cv2.cvtColor(np.array(Image.alpha_composite(base, capa).convert("RGB")), cv2.COLOR_RGB2BGR)
 
     uc = u * 0.72                                  # escala de la tarjeta (mas compacta)
     # tarjeta resumen (blanca, semitransparente, esquinas redondeadas) abajo a la izquierda
@@ -337,17 +340,19 @@ def analizar_archivo(ruta, bgr, mascara, gsd_configurado, conf_pista=None, clase
     fuente = "EXIF" if gsd_exif else ("configurado" if gsd_configurado else "sin GSD")
     gsd = gsd_exif or gsd_configurado
     args = (bgr, mascara, gsd, fuente)
-    datos_pista = {"conf_pista": conf_pista, "clase_pista": clase_pista}
+    datos_pista = {"conf_pista": conf_pista, "clase_pista": clase_pista, "mostrar_resumen": False}
     overlay, resumen = analizar(*args, **datos_pista, media_resolucion=media_resolucion)
     if media_resolucion and gsd:
         p10 = resumen["ancho_min_p10_m"]
         umbrales = (F_CRITICO * ANCHO_CAMION_M, F_OPTIMO * ANCHO_CAMION_M)
         if p10 == "" or any(abs(p10 - umbral) <= umbral * 0.05 for umbral in umbrales):
-            return analizar(*args, **datos_pista)
+            overlay, resumen = analizar(*args, **datos_pista)
+    resumen["resumen_incrustado"] = False
     return overlay, resumen
 
 
-def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista=None, *, media_resolucion=False):
+def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista=None, *,
+             media_resolucion=False, mostrar_resumen=True):
     """Mide el ancho sobre una mascara de pista ya limpia. Devuelve (imagen anotada, resumen)."""
     h, w = bgr.shape[:2]
     escala_px = 2 if media_resolucion and min(h, w) >= 2 else 1
@@ -421,7 +426,8 @@ def analizar(bgr, m, gsd, fuente, separacion_m=1.0, conf_pista=None, clase_pista
         banda = m[y_top:y_top + max(1, h // 20)]
         x_c = float(np.nonzero(banda)[1].mean())
         pista = (conf_pista, clase_pista, (x_c, y_top + h * 0.06))
-    vis = dibujar_panel(vis, estado, col, p10, med, gsd, fuente, pct_val, etiquetas, pista)
+    vis = dibujar_panel(vis, estado, col, p10, med, gsd, fuente, pct_val, etiquetas, pista,
+                       mostrar_resumen=mostrar_resumen)
 
     return vis, dict(estado=estado,
                      ancho_min_p10_m=round(float(p10), 2) if p10 else "",

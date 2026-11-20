@@ -27,7 +27,7 @@ from app.services.ancho_pista import analizar_archivo, limpiar
 async def lifespan(app: FastAPI):
     if os.environ.get("INFERENCE_PRELOAD") == "1":
         if not os.environ.get("INFERENCE_TOKEN"):
-            raise RuntimeError("Configura INFERENCE_TOKEN para ejecutar Jade.")
+            raise RuntimeError("Configura INFERENCE_TOKEN para ejecutar el servicio de inferencia.")
         load_road_model(ROAD_WEIGHTS)
         load_rock_model(ROCK_WEIGHTS)
     yield

@@ -72,6 +72,7 @@ def test_remote_off_road_rocks_and_road_width(tmp_path, monkeypatch):
     assert jpg_path.is_file() and json_path.is_file()
     summary = json.loads(json_path.read_text(encoding="utf-8"))
     assert summary["clase_pista"] == "Carpeta pedregosa"
+    assert summary["resumen_incrustado"] is False
     assert 14 <= summary["ancho_mediano_m"] <= 18  # 160 px x 10 cm/px = 16 m
 
     # una mascara invalida no impide reportar las rocas

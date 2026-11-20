@@ -557,6 +557,9 @@ de cada misión con su referencia en RDS.
 
 En modo remoto, Jade calcula también el ancho de pista sobre la máscara
 de segmentación. Nina guarda el resumen y la imagen anotada para el visor.
+El visor presenta el resumen en una sección del panel de revisión. El campo `resumen_incrustado`
+del resultado de ancho indica si la imagen anotada contiene la tarjeta antigua.
+Para esos resultados, el visor recupera la zona de la tarjeta de la foto original.
 
 Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga ambos modelos YOLO26 al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
 Un único proceso de Nina coordina los trabajos y solicita apagar Jade tras

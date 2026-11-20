@@ -47,6 +47,7 @@ class RoadWidthRead(BaseModel):
     eje_medible_pct: float = 0.0
     confianza_pista: float | None = None
     clase_pista: str | None = None
+    resumen_incrustado: bool = True
 
 
 ImageRead.model_rebuild()

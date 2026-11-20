@@ -79,6 +79,7 @@ def read_road_width(image: Imagen) -> RoadWidthRead | None:
         eje_medible_pct=float(data.get("eje_medible_pct") or 0),
         confianza_pista=number(data.get("confianza_pista")),
         clase_pista=str(data.get("clase_pista") or "") or None,
+        resumen_incrustado=data.get("resumen_incrustado") is not False,
     )
 
 
