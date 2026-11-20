@@ -168,8 +168,9 @@ def eje_rapido(mp, radio_max):
     pasos = np.maximum(np.abs(np.diff(Y)), np.abs(np.diff(X))).astype(int)
     pasos = np.maximum(pasos, 1)
     t = np.concatenate([np.arange(n) / n + k for k, n in enumerate(pasos)] + [[len(pasos)]])
-    Yd = np.rint(np.interp(t, np.arange(len(Y)), Y)).astype(np.int64)
-    Xd = np.rint(np.interp(t, np.arange(len(X)), X)).astype(np.int64)
+    # Redondear los medios píxeles en la misma dirección para conservar pasos de 1 px.
+    Yd = np.floor(np.interp(t, np.arange(len(Y)), Y) + 0.5).astype(np.int64)
+    Xd = np.floor(np.interp(t, np.arange(len(X)), X) + 0.5).astype(np.int64)
     Yd, Xd = np.clip(Yd, 0, H - 1), np.clip(Xd, 0, W - 1)
     nuevo = np.ones(len(Yd), bool)
     nuevo[1:] = (np.diff(Yd) != 0) | (np.diff(Xd) != 0)
