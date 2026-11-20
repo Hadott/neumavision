@@ -7,6 +7,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy import event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -106,13 +107,19 @@ def test_remote_saves_width_returned_by_jade(tmp_path, monkeypatch):
 @pytest.fixture
 def isolated_platform(tmp_path, monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection, _):
+        connection.execute("PRAGMA foreign_keys=ON")
+
     SQLModel.metadata.create_all(engine)
     actor = Faena(id_faena="mine-a", nombre="A", correo="a@test.cl", hash_contrasena="test", rol="faena")
     with Session(engine) as session:
         session.add(actor)
         session.add(Faena(id_faena="mine-b", nombre="B", correo="b@test.cl", hash_contrasena="test", rol="faena"))
+        session.flush()
         session.add(Mision(id_mision="own", id_faena="mine-a", nombre="Propia"))
         session.add(Mision(id_mision="other", id_faena="mine-b", nombre="Ajena"))
+        session.flush()
         path = tmp_path / "original.jpg"
         Image.new("RGB", (100, 80)).save(path)
         session.add(Imagen(id_imagen="image", id_mision="own", nombre_archivo="original.jpg",

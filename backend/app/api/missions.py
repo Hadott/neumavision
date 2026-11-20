@@ -171,6 +171,7 @@ async def create_mission(
     session.add(mission)
     originals = []
     try:
+        session.flush()
         for upload in files:
             target = await save_upload(mission.id_mision, upload)
             try:
@@ -213,6 +214,7 @@ def create_demo_mission(cuenta: CurrentFaena, session: Session = Depends(get_ses
         tramo="Tramo A · km 2,4–3,0",
     )
     session.add(mission)
+    session.flush()
     directory = mission_directory(mission.id_mision)
     for index in range(4):
         image = Image.new("RGB", (1200, 700), (138, 169, 179))
