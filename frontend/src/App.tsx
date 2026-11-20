@@ -30,9 +30,11 @@ import {
   Wrench,
   X,
   XCircle,
-  Ruler
+  Ruler,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, getSession, setSession, setUnauthorizedHandler } from "./api";
 import AdminAccounts from "./AdminAccounts";
@@ -100,6 +102,46 @@ const widthClass = (estado: string) => {
   return "sin";
 };
 const confidence = (value: number) => `${Math.round(value * 100)}%`;
+
+function ReviewImageZoom({ image, children }: { image: MissionImage; children: ReactNode }) {
+  const [zoom, setZoom] = useState(100);
+  const viewport = useRef<HTMLDivElement>(null);
+
+  function changeZoom(next: number) {
+    const element = viewport.current;
+    if (!element) return;
+    const centerX = (element.scrollLeft + element.clientWidth / 2) / element.scrollWidth;
+    const centerY = (element.scrollTop + element.clientHeight / 2) / element.scrollHeight;
+    setZoom(next);
+    requestAnimationFrame(() => {
+      element.scrollTo(
+        centerX * element.scrollWidth - element.clientWidth / 2,
+        centerY * element.scrollHeight - element.clientHeight / 2,
+      );
+    });
+  }
+
+  return (
+    <>
+      <div className="image-zoom-controls" role="group" aria-label="Zoom de la imagen">
+        <button type="button" className="button ghost" aria-label="Alejar imagen" disabled={zoom === 100} onClick={() => changeZoom(zoom - 25)}><ZoomOut size={16} /></button>
+        <button type="button" className="button ghost" aria-label={`Restablecer zoom al 100% (actual: ${zoom}%)`} onClick={() => changeZoom(100)}>{zoom}%</button>
+        <button type="button" className="button ghost" aria-label="Acercar imagen" disabled={zoom === 300} onClick={() => changeZoom(zoom + 25)}><ZoomIn size={16} /></button>
+      </div>
+      <div
+        className="image-zoom-viewport"
+        ref={viewport}
+        style={{ aspectRatio: `${image.width} / ${image.height}` }}
+        tabIndex={zoom > 100 ? 0 : undefined}
+        role="region"
+        aria-label="Imagen de hallazgos"
+      >
+        <div className="image-stage" style={{ width: `${zoom}%` }}>{children}</div>
+      </div>
+    </>
+  );
+}
+
 const filenameOrder = new Intl.Collator("es-CL", { numeric: true });
 const formatDuration = (milliseconds: number) => {
   const seconds = Math.round(milliseconds / 1000);
@@ -266,13 +308,15 @@ export default function App() {
     [allDetections]
   );
   const selectedImage = orderedImages.find((image) => image.id === selectedImageId) ?? orderedImages[0] ?? null;
-  const visibleDetections = selectedImage?.detections.filter(
+  const imageDetections = selectedImage?.detections ?? [];
+  const visibleDetections = imageView === "segmentacion" ? [] : imageDetections.filter(
     (item) => item.confidence >= threshold && enabledLabels.includes(item.label) && item.review_status !== "rejected"
-  ) ?? [];
+  );
   const filteredAll = allDetections.filter(
     (item) => item.confidence >= threshold && enabledLabels.includes(item.label) && item.review_status !== "rejected"
   );
-  const pending = allDetections.filter((item) => item.review_status === "pending").length;
+  const imagePending = imageDetections.filter((item) => item.review_status === "pending").length;
+  const imageConfirmed = imageDetections.filter((item) => item.review_status === "confirmed").length;
   const confirmed = allDetections.filter((item) => item.review_status === "confirmed").length;
   const average = allDetections.length
     ? allDetections.reduce((total, item) => total + item.confidence, 0) / allDetections.length
@@ -1112,7 +1156,7 @@ export default function App() {
               <aside className="card filters-card">
                 <div className="card-title compact"><div><span className="overline">Filtros</span><h2>Hallazgos</h2></div><SlidersHorizontal size={18} /></div>
                 <div className="filter-list">
-                  {availableLabels.map((label) => <button key={label} className={enabledLabels.includes(label) ? "enabled" : ""} onClick={() => toggleLabel(label)}><i style={{ background: colorForLabel[label] ?? fallbackColor }} /><span>{label}</span><strong>{counts[label] ?? 0}</strong><em>{enabledLabels.includes(label) && <Check size={11} />}</em></button>)}
+                  {availableLabels.map((label) => <button key={label} className={enabledLabels.includes(label) ? "enabled" : ""} onClick={() => toggleLabel(label)}><i style={{ background: colorForLabel[label] ?? fallbackColor }} /><span>{label}</span><strong>{imageDetections.filter((item) => item.label === label).length}</strong><em>{enabledLabels.includes(label) && <Check size={11} />}</em></button>)}
                 </div>
                 <div className="threshold">
                   <label><span>Confianza mínima</span><strong>{confidence(threshold)}</strong></label>
@@ -1120,20 +1164,20 @@ export default function App() {
                   <small><span>30%</span><span>95%</span></small>
                 </div>
                 <div className="stats-mini">
-                     <div><ScanLine size={15} /><span>Visibles</span><strong><AnimatedNumber value={filteredAll.length} /></strong></div>
-                  <div><CircleDot size={15} /><span>Pendientes</span><strong><AnimatedNumber value={pending} /></strong></div>
-                  <div><CheckCircle2 size={15} /><span>Confirmadas</span><strong><AnimatedNumber value={confirmed} /></strong></div>
+                  <div><ScanLine size={15} /><span>Visibles</span><strong><AnimatedNumber value={visibleDetections.length} /></strong></div>
+                  <div><CircleDot size={15} /><span>Pendientes</span><strong><AnimatedNumber value={imagePending} /></strong></div>
+                  <div><CheckCircle2 size={15} /><span>Confirmadas</span><strong><AnimatedNumber value={imageConfirmed} /></strong></div>
                 </div>
               </aside>
 
               <div className="viewer-column">
                 <div className="card viewer-card">
                   <div className="image-meta"><div><FileImage size={17} /><span><strong>{selectedImage.filename}</strong><small>{selectedImage.latitude ? `${selectedImage.latitude.toFixed(5)}, ${selectedImage.longitude?.toFixed(5)}` : "Sin coordenadas EXIF"}</small></span></div><div className="image-meta-actions">{(selectedImage.road_width_url || selectedImage.analysis_url) && <div className="view-switch" role="group" aria-label="Vista de la imagen">{imageViewOptions.map((option) => <button key={option.value} type="button" className={imageView === option.value ? "active" : ""} onClick={() => setImageView(option.value)}>{option.label}</button>)}</div>}{selectedImage.road_width && <span className={`width-badge ${widthClass(selectedImage.road_width.estado)}`} title="Ancho de pista (percentil 10)"><Ruler size={13} />{selectedImage.road_width.confianza_pista != null ? `${selectedImage.road_width.clase_pista ?? "Pista"} ${confidence(selectedImage.road_width.confianza_pista)} · ` : ""}{selectedImage.road_width.ancho_min_m != null ? `${selectedImage.road_width.ancho_min_m.toFixed(1).replace(".", ",")} m` : "—"} · {selectedImage.road_width.estado}</span>}<span className="pill">{visibleDetections.length} hallazgos</span></div></div>
-                  <div className="image-stage">
+                  <ReviewImageZoom key={selectedImage.id} image={selectedImage}>
                     <img width={selectedImage.width} height={selectedImage.height} src={api.imageUrl(imageView !== "rocas" ? (selectedImage.road_width_url ?? selectedImage.analysis_url ?? selectedImage.image_url) : selectedImage.image_url)} alt="Camino minero bajo revisión" />
-                    {imageView !== "segmentacion" && visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
+                    {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
                     <span className="demo-watermark">{health?.detector === "mock" ? "SIMULACIÓN" : "INFERENCIA"}</span>
-                  </div>
+                  </ReviewImageZoom>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}><ArrowLeft size={15} /> Anterior</button><span>{orderedImages.findIndex((image) => image.id === selectedImage.id) + 1} / {orderedImages.length}</span><button onClick={() => selectRelative(1)}>Siguiente <ArrowRight size={15} /></button></div>
                 </div>
                 <section className="card mission-gallery" aria-labelledby="mission-gallery-title">
