@@ -82,7 +82,25 @@ def mascara_pista_conf(modelo, img_rgb, umbral):
     return np.zeros((h, w), np.uint8), None, None
 
 
+# Lado maximo (px) con que se limpia la mascara. La mascara del modelo se calcula a
+# <= 3840 px, asi que limpiarla a resolucion completa (hasta 100 MP) no agrega
+# detalle y tardaba ~50 s por foto. Los bordes se recuperan con interpolacion.
+LADO_LIMPIEZA = 2048
+
+
 def limpiar(m):
+    h, w = m.shape
+    f = max(h, w) / LADO_LIMPIEZA
+    if f <= 1:
+        return (_suavizado(m) > 0.5).astype(np.uint8)
+    chica = cv2.resize(m.astype(np.float32), (max(1, round(w / f)), max(1, round(h / f))),
+                       interpolation=cv2.INTER_AREA)
+    s = _suavizado((chica >= 0.5).astype(np.uint8))
+    return (cv2.resize(s, (w, h), interpolation=cv2.INTER_LINEAR) > 0.5).astype(np.uint8)
+
+
+def _suavizado(m):
+    """Mascara limpia y suavizada (float 0-1, umbral 0.5)."""
     h, w = m.shape
     k = max(5, int(min(h, w) * 0.01)) | 1
     m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
@@ -101,8 +119,7 @@ def limpiar(m):
         if not toca_borde and a < 0.02 * h * w:
             out[lab == i] = 1
     # suavizar bordes para un eje central sin ramas espurias
-    s = cv2.GaussianBlur(out.astype(np.float32), (0, 0), sigmaX=min(h, w) * 0.01)
-    return (s > 0.5).astype(np.uint8)
+    return cv2.GaussianBlur(out.astype(np.float32), (0, 0), sigmaX=min(h, w) * 0.01)
 
 
 def eje_principal(sk):
