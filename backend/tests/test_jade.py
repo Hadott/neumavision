@@ -121,3 +121,49 @@ def test_running_instance_without_ready_service(manager, monkeypatch):
     assert manager.status() == "unavailable"
     manager.missions.add("starting")
     assert manager.status() == "starting"
+
+
+def test_manual_start_retries_capacity_without_stopping_jade(manager, monkeypatch):
+    manager.ec2.describe_instances.side_effect = [
+        instance("stopped"), instance("stopped"), instance("running"),
+    ]
+    manager.ec2.start_instances.side_effect = [
+        ClientError({"Error": {"Code": "InsufficientInstanceCapacity"}}, "StartInstances"),
+        {},
+    ]
+    monkeypatch.setattr(manager, "service_ready", lambda: True)
+    phases = []
+
+    def observe_retry(seconds):
+        phases.append((seconds, manager.status()))
+        if seconds != lifecycle.MANUAL_RETRY_SECONDS:
+            return
+        manager.request_start()
+        manager.stop_if_idle()
+        with pytest.raises(lifecycle.JadeUnavailable):
+            with manager.mission("during-start"):
+                pytest.fail("La misión debe esperar a que Jade esté lista.")
+
+    monkeypatch.setattr(lifecycle, "sleep", observe_retry)
+    manager.manual_start_phase = "starting"
+    manager._manual_start()
+
+    assert phases == [(lifecycle.MANUAL_RETRY_SECONDS, "waiting_capacity"), (3, "starting")]
+    assert manager.ec2.start_instances.call_count == 2
+    manager.ec2.stop_instances.assert_not_called()
+    assert manager.manual_start_phase is None
+    assert manager.manual_start_error is None
+
+
+def test_manual_start_reports_exhausted_capacity(manager, monkeypatch):
+    monkeypatch.setattr(lifecycle, "MANUAL_START_ATTEMPTS", 2)
+    manager.ec2.describe_instances.return_value = instance("stopped")
+    manager.ec2.start_instances.side_effect = ClientError(
+        {"Error": {"Code": "InsufficientInstanceCapacity"}}, "StartInstances",
+    )
+    manager.manual_start_phase = "starting"
+    manager._manual_start()
+
+    assert manager.ec2.start_instances.call_count == 2
+    assert manager.status() == "down"
+    assert "sin capacidad" in manager.manual_start_error

@@ -198,19 +198,22 @@ del camino con la máscara que devuelve Jade.
 sudo apt-get install --no-install-recommends libgl1
 ```
 
-Desde Nina, comprobar primero que Jade responde:
+Para las pruebas desde Nina, usar la IPv4 privada de Jade (`172.31.17.129`)
+y comprobar que el servicio de inferencia responde:
 
 ```bash
-curl -fsS --connect-timeout 5 http://IP_PRIVADA_JADE:8001/health
+curl -fsS --connect-timeout 5 http://172.31.17.129:8001/health
 ```
 
-Validar también `POST /predict` con el token y una foto real de camino.
+La respuesta esperada es `{"status":"ok","pipeline":"road_rocks"}`.
+Para probar una inferencia completa, validar también `POST /predict` con el
+token y una foto real de camino.
 Con `INFERENCE_PRELOAD=1`, `/health` empieza a responder cuando se han
 cargado ambos checkpoints. La predicción comprueba que el pipeline completo
 funciona con el runtime de Jade.
 
 En la configuración de arranque del backend de Nina, definir
-`DETECTOR_MODE=remote`, `INFERENCE_URL=http://IP_PRIVADA_JADE:8001` y el mismo
+`DETECTOR_MODE=remote`, `INFERENCE_URL=http://172.31.17.129:8001` y el mismo
 `INFERENCE_TOKEN` de Jade. Conservar la configuración existente del backend y
 reiniciar su servicio. Desde la plataforma, crear una misión de prueba con una
 foto de camino y pulsar **Ejecutar detección**. Comprobar que se muestra la
@@ -239,7 +242,7 @@ arranca automáticamente con el sistema operativo. Configurar en Nina:
 | Variable | Valor |
 | --- | --- |
 | `DETECTOR_MODE` | `remote` |
-| `INFERENCE_URL` | `http://IP_PRIVADA_JADE:8001` |
+| `INFERENCE_URL` | `http://172.31.17.129:8001` |
 | `INFERENCE_TOKEN` | El mismo secreto de Jade |
 | `JADE_INSTANCE_ID` | ID EC2 de Jade |
 | `JADE_REGION` | Región de Jade (por defecto `us-east-2`) |
@@ -247,6 +250,14 @@ arranca automáticamente con el sistema operativo. Configurar en Nina:
 | `JADE_IDLE_TIMEOUT_SECONDS` | Segundos de inactividad antes del apagado (1200 por defecto). Usar 0 para desactivar el apagado automático. |
 | `INFERENCE_TIMEOUT` | Tiempo máximo por solicitud de imagen, en segundos (300 por defecto) |
 | `ANALYSIS_S3_BUCKET` | Bucket privado para originales, JPEG procesados y PDF |
+
+Cuando Jade esté apagada, un administrador puede pulsar **Encender Jade** en
+el indicador de inferencia. `POST /api/v1/inference/start` acepta la solicitud
+y Nina intenta el arranque en segundo plano. Si EC2 devuelve un error de
+capacidad, reintenta cada 10 segundos hasta completar 720 intentos.
+`GET /api/v1/inference/health` muestra la espera de capacidad, el arranque y
+cualquier error de la solicitud. Los reintentos siguen al cerrar la pestaña
+y se interrumpen al reiniciar el backend.
 
 El rol de instancia de Nina requiere `ec2:DescribeInstances` sobre `*` y
 `ec2:StartInstances` y `ec2:StopInstances` limitados al ARN de Jade. Para S3

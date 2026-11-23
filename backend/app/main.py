@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
@@ -10,7 +10,7 @@ from app.api.dashboard import router as dashboard_router
 from app.config import settings
 from app.database import ensure_development_faena, initialize_database
 from app.schemas import HealthRead, InferenceHealthRead
-from app.services.auth import CurrentFaena
+from app.services.auth import CurrentFaena, is_admin
 from app.services.jade import IDLE_CHECK_SECONDS, jade
 
 
@@ -63,9 +63,22 @@ def health() -> HealthRead:
 @app.get(f"{settings.api_prefix}/inference/health", response_model=InferenceHealthRead, tags=["system"])
 def inference_health(cuenta: CurrentFaena) -> InferenceHealthRead:
     managed = settings.detector_mode == "remote" and bool(settings.jade_instance_id)
+    status = jade.status()
     return InferenceHealthRead(
-        status=jade.status(), idle_timeout_seconds=settings.jade_idle_timeout_seconds if managed else None,
+        status=status,
+        idle_timeout_seconds=settings.jade_idle_timeout_seconds if managed else None,
+        start_error=jade.manual_start_error if managed and status != "up" else None,
     )
+
+
+@app.post(f"{settings.api_prefix}/inference/start", status_code=202, tags=["system"])
+def start_inference(cuenta: CurrentFaena) -> dict[str, str]:
+    if not is_admin(cuenta):
+        raise HTTPException(403, "Solo un administrador puede encender Jade.")
+    if settings.detector_mode != "remote" or not settings.jade_instance_id:
+        raise HTTPException(409, "El encendido de Jade no está configurado.")
+    jade.request_start()
+    return {"status": "accepted"}
 
 
 app.include_router(auth_router, prefix=settings.api_prefix)

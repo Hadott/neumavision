@@ -3,7 +3,7 @@
 import logging
 from contextlib import contextmanager
 from functools import cached_property
-from threading import Lock
+from threading import Lock, Thread
 from time import monotonic, sleep
 
 import boto3
@@ -17,6 +17,8 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 CAPACITY_ERRORS = {"InsufficientInstanceCapacity", "InsufficientHostCapacity"}
 IDLE_CHECK_SECONDS = 15
+MANUAL_START_ATTEMPTS = 720
+MANUAL_RETRY_SECONDS = 10
 
 
 class JadeUnavailable(RuntimeError):
@@ -34,6 +36,8 @@ class Jade:
         self.missions: set[str] = set()
         self.stop_requested = False
         self.ready = False
+        self.manual_start_phase: str | None = None
+        self.manual_start_error: str | None = None
         self.idle_since: float | None = None
 
     @cached_property
@@ -58,6 +62,9 @@ class Jade:
             return "disabled"
         if not settings.jade_instance_id:
             return "up" if self.service_ready() else "unavailable"
+        with self.lock:
+            if self.manual_start_phase:
+                return self.manual_start_phase
         try:
             state = self.instance_state()
         except (BotoCoreError, ClientError, IndexError, KeyError):
@@ -78,7 +85,7 @@ class Jade:
         if timeout == 0:
             return
         with self.lock:
-            if self.missions:
+            if self.missions or self.manual_start_phase:
                 return
             try:
                 state = self.instance_state()
@@ -95,10 +102,35 @@ class Jade:
             except (BotoCoreError, ClientError, IndexError, KeyError):
                 logger.exception("No se pudo comprobar o detener Jade por inactividad")
 
-    def wait_until_ready(self) -> None:
+    def request_start(self) -> None:
+        with self.lock:
+            if self.manual_start_phase or self.missions:
+                return
+            self.manual_start_phase = "starting"
+            self.manual_start_error = None
+            Thread(target=self._manual_start, name="jade-start", daemon=True).start()
+
+    def _manual_start(self) -> None:
+        error_message = None
+        try:
+            with self.start_lock:
+                self.wait_until_ready(manual=True)
+        except JadeUnavailable as error:
+            error_message = str(error)
+        except (BotoCoreError, ClientError, IndexError, KeyError):
+            logger.exception("No se pudo iniciar Jade desde la plataforma")
+            error_message = "No se pudo preparar Jade en AWS."
+        finally:
+            with self.lock:
+                self.manual_start_error = error_message
+                self.manual_start_phase = None
+                self.idle_since = monotonic()
+
+    def wait_until_ready(self, *, manual: bool = False) -> None:
         deadline = monotonic() + settings.jade_start_timeout
         instance_ids = [settings.jade_instance_id]
         started = False
+        capacity_failures = 0
         while monotonic() < deadline:
             state = self.instance_state()
             if state in {"shutting-down", "terminated"}:
@@ -109,12 +141,30 @@ class Jade:
                     try:
                         self.ec2.start_instances(InstanceIds=instance_ids)
                         started = True
+                        if manual:
+                            with self.lock:
+                                self.manual_start_phase = "starting"
+                            deadline = monotonic() + settings.jade_start_timeout
                     except ClientError as error:
                         if error.response["Error"]["Code"] not in CAPACITY_ERRORS:
                             raise
                         logger.warning("AWS no tiene capacidad para iniciar Jade. Se reintentará.")
-                        sleep(min(15, max(0, deadline - monotonic())))
+                        if manual:
+                            capacity_failures += 1
+                            if capacity_failures >= MANUAL_START_ATTEMPTS:
+                                raise JadeUnavailable(
+                                    f"AWS sigue sin capacidad para encender Jade después de {MANUAL_START_ATTEMPTS} intentos."
+                                ) from error
+                            with self.lock:
+                                self.manual_start_phase = "waiting_capacity"
+                            sleep(MANUAL_RETRY_SECONDS)
+                            deadline = monotonic() + settings.jade_start_timeout
+                        else:
+                            sleep(min(15, max(0, deadline - monotonic())))
                         continue
+            if manual and state in {"pending", "running"}:
+                with self.lock:
+                    self.manual_start_phase = "starting"
             if state == "running" and not self.stop_requested and self.service_ready():
                 return
             sleep(min(3, max(0, deadline - monotonic())))
@@ -123,6 +173,8 @@ class Jade:
     @contextmanager
     def mission(self, mission_id: str):
         with self.lock:
+            if self.manual_start_phase:
+                raise JadeUnavailable("Jade está encendiéndose. Espera a que la inferencia esté lista.")
             if mission_id in self.missions:
                 raise MissionAlreadyRunning("La misión ya se está procesando.")
             self.missions.add(mission_id)

@@ -72,6 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>("/health"),
+  startInference: () => request<{ status: "accepted" }>("/inference/start", { method: "POST" }),
   inferenceHealth: () => request<InferenceHealth>("/inference/health"),
 
   login: (correo: string, contrasena: string) =>

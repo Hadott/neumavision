@@ -99,8 +99,9 @@ export type Health = {
 };
 
 export type InferenceHealth = {
-  status: "up" | "down" | "starting" | "stopping" | "unavailable" | "unknown" | "disabled";
+  status: "up" | "down" | "waiting_capacity" | "starting" | "stopping" | "unavailable" | "unknown" | "disabled";
   idle_timeout_seconds: number | null;
+  start_error?: string | null;
 };
 
 export type DetectionProgress = {

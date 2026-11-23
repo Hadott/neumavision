@@ -124,6 +124,7 @@ class HealthRead(BaseModel):
 class InferenceHealthRead(BaseModel):
     status: str
     idle_timeout_seconds: int | None
+    start_error: str | None = None
 
 
 class DetectionProgressRead(BaseModel):

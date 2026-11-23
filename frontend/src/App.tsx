@@ -20,15 +20,28 @@ import type { Account, DashboardFinding, Detection, DetectionProgress, Health, I
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
-type Screen = "history" | "workspace" | "dashboard" | "accounts";
+const HISTORY_PATH = "/historial";
+const NEW_MISSION_PATH = "/misiones/nueva";
+
+function currentLocation() {
+  return window.location.pathname.replace(/\/+$/, "") + window.location.search || "/";
+}
+
+function navigate(path: string, replace = false) {
+  if (currentLocation() === path) return;
+  if (replace) window.history.replaceState(null, "", path);
+  else window.history.pushState(null, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
 type View = "upload" | "review" | "report";
-type Busy = "upload" | "detect" | "report" | "open" | null;
+type Busy = "upload" | "detect" | "report" | null;
 type DashReview = "pending" | "confirmed";
 
 const inferenceStatusLabel: Record<InferenceHealth["status"], string> = {
   up: "Encendida · Up",
   down: "Apagada · Down",
   starting: "Encendiendo",
+  waiting_capacity: "Esperando capacidad de AWS",
   stopping: "Apagando",
   unavailable: "Servicio sin respuesta",
   unknown: "Estado no disponible",
@@ -199,9 +212,17 @@ const ALL_DASH_REPAIR: RepairStatus[] = ["pending", "repaired"];
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [inferenceHealth, setInferenceHealth] = useState<InferenceHealth | null>(null);
-  const [screen, setScreen] = useState<Screen>("history");
+  const [startingInference, setStartingInference] = useState(false);
+  const [inferenceStartError, setInferenceStartError] = useState("");
+  const [location, setLocation] = useState(currentLocation);
+  const [path, query = ""] = location.split("?", 2);
+  const missionPath = path === NEW_MISSION_PATH ? null : /^\/misiones\/([a-zA-Z0-9_-]+)$/.exec(path)?.[1];
+  const routeQuery = new URLSearchParams(query);
+  const evidenceImageId = routeQuery.get("imagen");
+  const evidenceDetectionId = routeQuery.get("deteccion");
+  const newMission = path === NEW_MISSION_PATH;
   const [view, setView] = useState<View>("upload");
-  const [mission, setMission] = useState<Mission | null>(null);
+  const [loadedMission, setMission] = useState<Mission | null>(null);
   const [selectedImageId, setSelectedImageId] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [missionName, setMissionName] = useState("");
@@ -243,6 +264,50 @@ export default function App() {
   const [faenaFiltro, setFaenaFiltro] = useState("");
   const [missionFaena, setMissionFaena] = useState("");
   const isAdmin = session?.cuenta.rol === "admin";
+  const screen = path === "/dashboard" ? "dashboard"
+    : path === "/cuentas" && isAdmin ? "accounts"
+    : newMission || missionPath ? "workspace" : "history";
+  const mission = loadedMission?.id === missionPath ? loadedMission : null;
+
+  useEffect(() => {
+    const updateLocation = () => {
+      setLocation(currentLocation());
+      setError("");
+    };
+    window.addEventListener("popstate", updateLocation);
+    return () => window.removeEventListener("popstate", updateLocation);
+  }, []);
+
+  useEffect(() => {
+    if (session && screen === "history" && path !== HISTORY_PATH) navigate(HISTORY_PATH, true);
+  }, [session, screen, path]);
+
+  useEffect(() => {
+    if (newMission) resetWorkspace();
+  }, [newMission]);
+
+  useEffect(() => {
+    if (!session || !missionPath || loadedMission?.id === missionPath) return;
+    let active = true;
+    api.getMission(missionPath).then((loaded) => {
+      if (!active) return;
+      setSelectedImageId("");
+      setEnabledLabels(Array.from(new Set(loaded.images.flatMap((image) => image.detections.map((item) => item.label)))));
+      setView(loaded.status === "review" ? "review" : "upload");
+      setMission(loaded);
+    }).catch((requestError) => {
+      if (active) setError(requestError instanceof Error ? requestError.message : "No fue posible abrir la misión.");
+    });
+    return () => { active = false; };
+  }, [session, missionPath, loadedMission?.id]);
+
+  useEffect(() => {
+    if (evidenceImageId && mission?.images.some((image) => image.id === evidenceImageId)) {
+      setSelectedImageId(evidenceImageId);
+      setView("review");
+    }
+  }, [mission, evidenceImageId]);
+
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
@@ -442,28 +507,42 @@ export default function App() {
     }
   }
 
+  async function startInference() {
+    setStartingInference(true);
+    setInferenceStartError("");
+    try {
+      await api.startInference();
+      setInferenceHealth(await api.inferenceHealth());
+    } catch (requestError) {
+      setInferenceStartError(requestError instanceof Error ? requestError.message : "No se pudo solicitar el encendido.");
+    } finally {
+      setStartingInference(false);
+    }
+  }
+
   function goToHistory() {
-    setScreen("history");
+    navigate(HISTORY_PATH);
     setError("");
   }
 
   function handleLogin(next: Session) {
     setSession(next);
     setSessionState(next);
-    setScreen("history");
     setError("");
   }
 
   function logout(message = "") {
     setSession(null);
     setSessionState(null);
+    setInferenceHealth(null);
+    setInferenceStartError("");
     setFaenas([]);
     setFaenaFiltro("");
     setMissionFaena("");
     setMissions([]);
     setDashFindings([]);
     setMission(null);
-    setScreen("history");
+    if (!message) navigate(HISTORY_PATH, true);
     setError(message);
   }
 
@@ -473,36 +552,22 @@ export default function App() {
   }
 
   function openDashboard() {
-    setScreen("dashboard");
+    navigate("/dashboard");
     setError("");
   }
 
   function viewAccountMissions(account: Account) {
     setFaenaFiltro(account.id);
-    setScreen("history");
+    navigate(HISTORY_PATH);
     setError("");
   }
 
   function startNewMission() {
-    resetWorkspace();
-    setScreen("workspace");
+    navigate(NEW_MISSION_PATH);
   }
 
-  async function openMission(id: string) {
-    setBusy("open");
-    setError("");
-    try {
-      const loaded = await api.getMission(id);
-      setMission(loaded);
-      setSelectedImageId("");
-      setEnabledLabels(Array.from(new Set(loaded.images.flatMap((image) => image.detections.map((item) => item.label)))));
-      setView(loaded.status === "review" ? "review" : "upload");
-      setScreen("workspace");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No fue posible abrir la misión.");
-    } finally {
-      setBusy(null);
-    }
+  function openMission(id: string) {
+    navigate(`/misiones/${encodeURIComponent(id)}`);
   }
 
   function acceptFiles(incoming: FileList | File[]) {
@@ -534,7 +599,10 @@ export default function App() {
           remaining: fraction > 0 && fraction < 1 ? elapsedSeconds / fraction * (1 - fraction) : null,
         });
       });
-      setMission(created);
+      if (window.location.pathname === NEW_MISSION_PATH) {
+        setMission(created);
+        navigate(`/misiones/${encodeURIComponent(created.id)}`, true);
+      }
       setSelectedImageId("");
       setFiles([]);
       void refreshMissions();
@@ -562,9 +630,11 @@ export default function App() {
         milliseconds: performance.now() - startedAt,
         imageCount: processed.images.length,
       });
-      setMission(processed);
-      setEnabledLabels(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label)))));
-      setView("review");
+      setMission((current) => current?.id === processed.id ? processed : current);
+      if (window.location.pathname === `/misiones/${encodeURIComponent(processed.id)}`) {
+        setEnabledLabels(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label)))));
+        setView("review");
+      }
       void refreshMissions();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "La detección no pudo completarse.");
@@ -604,7 +674,8 @@ export default function App() {
   }
 
   function goToFindingMission(finding: DashboardFinding) {
-    void openMission(finding.mission_id);
+    const query = new URLSearchParams({ imagen: finding.image_id, deteccion: finding.id });
+    navigate(`/misiones/${encodeURIComponent(finding.mission_id)}?${query}`);
   }
 
   async function downloadReport() {
@@ -680,7 +751,7 @@ export default function App() {
           )}
           {screen !== "history" && <button className="button ghost" onClick={goToHistory}>Historial</button>}
           {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}>Dashboard</button>}
-          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => setScreen("accounts")}> Cuentas</button>}
+          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => navigate("/cuentas")}> Cuentas</button>}
           {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
           {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
           <span className="account-chip" title={session.cuenta.correo}>
@@ -697,12 +768,23 @@ export default function App() {
         </strong>
         {inferenceHealth?.idle_timeout_seconds != null && (
           <small>
-            {inferenceHealth.status === "starting"
+            {inferenceHealth.status === "waiting_capacity"
+              ? "AWS no tiene capacidad para Jade. Se reintenta cada 10 segundos."
+              : inferenceHealth.status === "starting"
               ? "El servicio de inferencia está iniciando y cargando los modelos. Puede tardar unos minutos."
               : inferenceHealth.idle_timeout_seconds === 0
                 ? "Apagado automático desactivado."
                 : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
           </small>
+        )}
+        {isAdmin && inferenceHealth?.idle_timeout_seconds != null &&
+          (inferenceHealth.status === "down" || inferenceHealth.status === "unavailable") && (
+          <button type="button" className="button secondary" disabled={startingInference} onClick={startInference}>
+            {startingInference ? "Solicitando encendido…" : "Encender Jade"}
+          </button>
+        )}
+        {(inferenceStartError || inferenceHealth?.start_error) && (
+          <small>{inferenceStartError || inferenceHealth?.start_error}</small>
         )}
       </div>
 
@@ -753,9 +835,9 @@ export default function App() {
                     className="card history-card"
                     role="button"
                     tabIndex={0}
-                    onClick={() => busy !== "open" && openMission(item.id)}
+                    onClick={() => openMission(item.id)}
                     onKeyDown={(event) => {
-                      if ((event.key === "Enter" || event.key === " ") && busy !== "open") openMission(item.id);
+                      if ((event.key === "Enter" || event.key === " ")) openMission(item.id);
                     }}
                   >
                     <button
@@ -1013,8 +1095,8 @@ export default function App() {
                           {repairBusyId === selectedFinding.id ? <LoaderCircle className="spin" size={14} /> : null}
                           {selectedFinding.repair_status === "repaired" ? "Marcar como pendiente" : "Marcar como reparada"}
                         </button>
-                        <button className="button secondary full" onClick={() => goToFindingMission(selectedFinding)} disabled={busy === "open"}>
-                          Ver misión completa
+                        <button className="button secondary full" onClick={() => goToFindingMission(selectedFinding)}>
+                          Ver imagen del hallazgo
                         </button>
                       </div>
                     </>
@@ -1080,7 +1162,7 @@ export default function App() {
                   <small>
                     Tiempo transcurrido · {formatDuration(elapsed)}
                     {detectionProgress && ` · ${detectionProgress.completed} de ${detectionProgress.total} imágenes procesadas`}
-                    {detectionProgress?.estimated_remaining_seconds != null &&
+                    {detectionProgress?.estimated_remaining_seconds != null && detectionProgress.completed >= 5 &&
                       ` · Quedan aprox. ${formatDuration(detectionProgress.estimated_remaining_seconds * 1000)} de análisis`}
                   </small>
                   {!detectionProgress && <small>Esperando que la plataforma informe el progreso.</small>}
@@ -1099,7 +1181,9 @@ export default function App() {
             </div>
           )}
 
-          {view === "upload" && (
+          {missionPath && !mission && !error && <p role="status">Cargando misión…</p>}
+
+          {view === "upload" && (newMission || mission) && (
             <section className={`workspace upload-layout fade-in-view ${mission ? "has-mission" : ""}`}>
               <form className="card upload-card" onSubmit={createMission}>
                 <div className="card-title">
@@ -1188,7 +1272,7 @@ export default function App() {
                       selectedImage.road_width?.resumen_incrustado !== false && (
                         <LegacyRoadWidthPatch image={selectedImage} />
                       )}
-                    {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
+                    {visibleDetections.map((item) => <div key={item.id} className={`box ${item.review_status}${item.id === evidenceDetectionId ? " linked-detection" : ""}`} title={`${item.label} · ${confidence(item.confidence)}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, width: `${item.width * 100}%`, height: `${item.height * 100}%`, borderColor: colorForLabel[item.label] ?? fallbackColor, ...(imageView === "ambas" ? originalPatch(item, selectedImage) : {}) }}><span className="box-conf">{confidence(item.confidence)}</span></div>)}
                   </ReviewImageZoom>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}> Anterior</button><span>{orderedImages.findIndex((image) => image.id === selectedImage.id) + 1} / {orderedImages.length}</span><button onClick={() => selectRelative(1)}>Siguiente </button></div>
                 </div>
@@ -1216,7 +1300,7 @@ export default function App() {
                 )}
                 <div className="card-title compact"><div><span className="overline">Imagen actual</span><h2>Revisión</h2></div><span className="pill">{selectedImage.detections.length}</span></div>
                 <div className="detection-list">
-                  {selectedImage.detections.map((item, index) => <div className={`detection-item ${item.review_status}`} key={item.id} style={{ ["--i" as string]: index } as any}>
+                  {selectedImage.detections.map((item, index) => <div className={`detection-item ${item.review_status}${item.id === evidenceDetectionId ? " linked-detection" : ""}`} key={item.id} style={{ ["--i" as string]: index } as any}>
                     <div><i style={{ background: colorForLabel[item.label] ?? fallbackColor }} /><strong>{item.label}</strong><span>{confidence(item.confidence)}</span></div>
                     <div className="confidence-line"><span style={{ width: confidence(item.confidence), background: colorForLabel[item.label] ?? fallbackColor }} /></div>
                     <span className="status-pill" style={{ marginTop: 2, background: item.review_status === "confirmed" ? "#e2f6f2" : item.review_status === "rejected" ? "#fdecea" : "#fef3c7", color: item.review_status === "confirmed" ? "#167d72" : item.review_status === "rejected" ? "#c0392b" : "#a16207" }}>
