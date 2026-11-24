@@ -1,8 +1,13 @@
 import {
+  BarChart3,
   Check,
   ChevronDown,
   LoaderCircle,
+  LogOut,
+  Plus,
+  Route,
   Trash2,
+  Users,
   X,
   ZoomIn,
   ZoomOut
@@ -16,7 +21,7 @@ import DashboardStats from "./DashboardStats";
 import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
 import Login from "./Login";
 import MapPanel from "./MapPanel";
-import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, RoadWidth, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, RoadWidth, Session } from "./types";
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
@@ -56,6 +61,9 @@ const colorForLabel: Record<string, string> = {
 };
 
 const fallbackColor = "#4ca8ff";
+// Las rocas fuera de la pista no van al informe: se ocultan por defecto y solo se muestran como referencia.
+const OFF_ROAD_LABEL = "Rocas fuera de pista";
+const withoutOffRoad = (labels: string[]) => labels.filter((label) => label !== OFF_ROAD_LABEL);
 type ImageView = "ambas" | "segmentacion" | "rocas";
 const imageViewOptions: { value: ImageView; label: string }[] = [
   { value: "ambas", label: "Pista + rocas" },
@@ -258,6 +266,7 @@ export default function App() {
   const [historyName, setHistoryName] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [criticalityBusyId, setCriticalityBusyId] = useState("");
+  const [reviewBusyId, setReviewBusyId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [dashFindings, setDashFindings] = useState<DashboardFinding[]>([]);
@@ -331,7 +340,7 @@ export default function App() {
     api.getMission(missionPath).then((loaded) => {
       if (!active) return;
       setSelectedImageId("");
-      setEnabledLabels(Array.from(new Set(loaded.images.flatMap((image) => image.detections.map((item) => item.label)))));
+      setEnabledLabels(withoutOffRoad(Array.from(new Set(loaded.images.flatMap((image) => image.detections.map((item) => item.label))))));
       setView(loaded.status === "review" ? "review" : "upload");
       setMission(loaded);
     }).catch((requestError) => {
@@ -403,7 +412,7 @@ export default function App() {
       setSelectedImageId(orderedImages[0].id);
     }
     const labels = Array.from(new Set(mission.images.flatMap((image) => image.detections.map((item) => item.label))));
-    if (labels.length) setEnabledLabels((current) => current.length ? current.filter((label) => labels.includes(label)) : labels);
+    if (labels.length) setEnabledLabels((current) => current.length ? current.filter((label) => labels.includes(label)) : withoutOffRoad(labels));
   }, [mission, orderedImages, selectedImageId]);
 
   useEffect(() => {
@@ -701,7 +710,7 @@ export default function App() {
       });
       setMission((current) => current?.id === processed.id ? processed : current);
       if (window.location.pathname === `/misiones/${encodeURIComponent(processed.id)}`) {
-        setEnabledLabels(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label)))));
+        setEnabledLabels(withoutOffRoad(Array.from(new Set(processed.images.flatMap((image) => image.detections.map((item) => item.label))))));
         setView("review");
       }
       void refreshMissions();
@@ -792,6 +801,26 @@ export default function App() {
     }
   }
 
+  async function reviewFinding(detection: Detection, status: ReviewStatus) {
+    if (!mission) return;
+    const next: ReviewStatus = detection.review_status === status ? "pending" : status;
+    setReviewBusyId(detection.id);
+    try {
+      const updated = await api.reviewDetection(mission.id, detection.id, next);
+      setMission((current) => current && ({
+        ...current,
+        images: current.images.map((image) => ({
+          ...image,
+          detections: image.detections.map((item) => item.id === detection.id ? { ...item, ...updated } : item)
+        }))
+      }));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No fue posible guardar la revisión de la roca.");
+    } finally {
+      setReviewBusyId("");
+    }
+  }
+
   function resetWorkspace() {
     setMission(null);
     setSelectedImageId("");
@@ -805,70 +834,75 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
-      <header className="topbar">
-        <button type="button" className="brand brand-button" onClick={goToHistory} aria-label="NeumaDiesel, ir al historial de misiones" title="Historial de misiones">
+    <div className="app-frame">
+      <nav className="sidebar" aria-label="Principal">
+        <button type="button" className="brand brand-button" onClick={goToHistory} aria-label="NeumaVision, ir a misiones">
           <span className="brand-icon"><img src={logoIcon} alt="" /></span>
-          <span><strong>NEUMADIESEL</strong><small>Visión de caminos</small></span>
+          <span><strong>NeumaVision</strong><small>NeumaDiesel</small></span>
         </button>
-        <div className="top-actions">
-          {isAdmin && screen !== "history" && (
-            <select className="faena-select" value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)} title="Faena visible">
+        {isAdmin && (
+          <label className="sidebar-field">Faena
+            <select className="faena-select" value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)}>
               <option value="">Todas las faenas</option>
               {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
             </select>
-          )}
-          {screen !== "history" && <button className="button ghost" onClick={goToHistory}>Historial</button>}
-          {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}>Dashboard</button>}
-          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => navigate("/cuentas")}>Administración</button>}
-          {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
-          {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
-          <span className="account-chip" title={session.cuenta.correo}>
-            <i>{session.cuenta.nombre.split(/\s+/).map((word) => word[0]).join("").slice(0, 3).toUpperCase()}</i>
-            <span><strong>{session.cuenta.nombre}</strong><small>{isAdmin ? "Administrador" : session.cuenta.correo}</small></span>
-          </span>
-          <button className="button ghost" onClick={() => logout()}> Cerrar sesión</button>
+          </label>
+        )}
+        <div className="sidebar-links">
+          <button type="button" className={screen === "history" || (screen === "workspace" && !newMission) ? "active" : ""}
+            aria-current={screen === "history" ? "page" : undefined} onClick={goToHistory}><Route size={18} />Misiones</button>
+          <button type="button" className={screen === "dashboard" ? "active" : ""}
+            aria-current={screen === "dashboard" ? "page" : undefined} onClick={openDashboard}><BarChart3 size={18} />Dashboard</button>
+          {isAdmin && <button type="button" className={screen === "accounts" ? "active" : ""}
+            aria-current={screen === "accounts" ? "page" : undefined} onClick={() => navigate("/cuentas")}><Users size={18} />Administración</button>}
         </div>
-      </header>
+        <button type="button" className={`button primary sidebar-new${newMission ? " current" : ""}`} onClick={startNewMission}><Plus size={16} />Nueva misión</button>
 
-      <div className="inference-health" role="status">
-        <strong><span className={`inference-indicator ${inferenceHealth?.status ?? "unknown"}`} aria-hidden="true" />
-          Servicio de inferencia · {inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
-        </strong>
-        {inferenceHealth?.idle_timeout_seconds != null && (
-          <small>
-            {inferenceHealth.status === "waiting_capacity"
-              ? "AWS no tiene capacidad para Jade. Se reintenta cada 10 segundos."
-              : inferenceHealth.status === "starting"
-              ? "El servicio de inferencia está iniciando y cargando los modelos. Puede tardar unos minutos."
-              : inferenceHealth.idle_timeout_seconds === 0
-                ? "Apagado automático desactivado."
-                : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
-          </small>
-        )}
-        {isAdmin && screen !== "accounts" && inferenceHealth?.idle_timeout_seconds != null &&
-          (inferenceHealth.status === "down" || inferenceHealth.status === "unavailable") && (
-          <button type="button" className="button secondary" disabled={startingInference} onClick={startInference}>
-            {startingInference ? "Solicitando encendido…" : "Encender Jade"}
-          </button>
-        )}
-        {(inferenceStartError || inferenceHealth?.start_error) && (
-          <small>{inferenceStartError || inferenceHealth?.start_error}</small>
-        )}
-      </div>
+        <div className="sidebar-status" role="status">
+          <strong><span className={`inference-indicator ${inferenceHealth?.status ?? "unknown"}`} aria-hidden="true" />
+            {inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
+          </strong>
+          {inferenceHealth?.idle_timeout_seconds != null && (
+            <small>
+              {inferenceHealth.status === "waiting_capacity"
+                ? "AWS no tiene capacidad para Jade. Se reintenta cada 10 segundos."
+                : inferenceHealth.status === "starting"
+                ? "Cargando los modelos. Puede tardar unos minutos."
+                : inferenceHealth.idle_timeout_seconds === 0
+                  ? "Apagado automático desactivado."
+                  : `Se enciende al analizar y se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin uso.`}
+            </small>
+          )}
+          {isAdmin && screen !== "accounts" && inferenceHealth?.idle_timeout_seconds != null &&
+            (inferenceHealth.status === "down" || inferenceHealth.status === "unavailable") && (
+            <button type="button" className="button secondary" disabled={startingInference} onClick={startInference}>
+              {startingInference ? "Solicitando encendido…" : "Encender Jade"}
+            </button>
+          )}
+          {(inferenceStartError || inferenceHealth?.start_error) && (
+            <small>{inferenceStartError || inferenceHealth?.start_error}</small>
+          )}
+        </div>
 
+        <div className="sidebar-account" title={session.cuenta.correo}>
+          <i>{session.cuenta.nombre.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase()}</i>
+          <span><strong>{session.cuenta.nombre}</strong><small>{isAdmin ? "Administrador" : session.cuenta.correo}</small></span>
+          <button type="button" aria-label="Cerrar sesión" title="Cerrar sesión" onClick={() => logout()}><LogOut size={17} /></button>
+        </div>
+      </nav>
+
+    <main className="shell">
       <AnimatePresence mode="wait">
       {screen === "accounts" && isAdmin && (
         <motion.div key="accounts" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
             <div>
-              <span className="overline">Administración de plataforma</span>
-              <h1>Panel de administración</h1>
+              <h1>Administración</h1>
               <p>Gestiona el servicio de inferencia y las cuentas de Neumavision.</p>
             </div>
-            <div className="architecture"><span>Solo administradores</span></div>
           </section>
-          <section className="workspace admin-accounts" aria-labelledby="inference-settings-title">
+          <section className="workspace" aria-labelledby="inference-settings-title">
+            <div className="card admin-accounts jade-card">
             <header className="admin-accounts-title">
               <div>
                 <h2 id="inference-settings-title">Jade · Amazon EC2 de inferencia</h2>
@@ -930,10 +964,8 @@ export default function App() {
               )}
             </form>
             {autoShutdownError && <p role="alert">{autoShutdownError}</p>}
+            </div>
           </section>
-          <div className="workspace">
-            <button type="button" className="button secondary admin-history-link" onClick={goToHistory}>Ver historial de misiones de faenas</button>
-          </div>
           <AdminAccounts onViewMissions={viewAccountMissions} />
         </motion.div>
       )}
@@ -942,8 +974,8 @@ export default function App() {
           <section className="hero">
             <div>
               
-              <h1>Historial de misiones</h1>
-              <p>Revisa las misiones ya procesadas o inicia una nueva inspección del camino minero.</p>
+              <h1>Misiones</h1>
+              <p>Cada misión es un vuelo de dron sobre un tramo. Ábrela para revisar sus imágenes.</p>
             </div>
           </section>
 
@@ -951,24 +983,17 @@ export default function App() {
 
           <section className="workspace history-layout">
             <div className="history-toolbar">
-              <div><span className="overline">Misiones</span><h2>{visibleMissions.length} {visibleMissions.length === 1 ? "misión" : "misiones"}</h2></div>
+              <div><h2>{visibleMissions.length} {visibleMissions.length === 1 ? "misión" : "misiones"}</h2></div>
               <div className="history-toolbar-actions">
                 <button className="button ghost" onClick={refreshMissions} disabled={missionsLoading}>
                   {missionsLoading ? <LoaderCircle className="spin" size={15} /> : null} Actualizar
                 </button>
-                <button className="button primary" onClick={startNewMission}>Nueva misión</button>
               </div>
             </div>
             <div className="filter-controls" role="group" aria-label="Filtros del historial de misiones">
               <label>Nombre de misión
                 <input type="search" value={historyName} onChange={(event) => setHistoryName(event.target.value)} />
               </label>
-              {isAdmin && <label>Faena
-                <select value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)}>
-                  <option value="">Todas las faenas</option>
-                  {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
-                </select>
-              </label>}
               <label>Fecha de creación desde
                 <input type="date" value={historyFrom} max={historyTo || undefined} onChange={(event) => setHistoryFrom(event.target.value)} />
               </label>
@@ -987,52 +1012,60 @@ export default function App() {
             {missionsLoading && !visibleMissions.length ? (
               <SkeletonCards count={6} />
             ) : visibleMissions.length ? (
-              <div className="history-grid">
-                {visibleMissions.map((item) => (
-                  <div
-                    key={item.id}
-                    className="card history-card"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openMission(item.id)}
-                    onKeyDown={(event) => {
-                      if ((event.key === "Enter" || event.key === " ")) openMission(item.id);
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="history-delete"
-                      title="Eliminar misión"
-                      disabled={deletingId === item.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleDeleteMission(item.id, item.name);
-                      }}
-                    >
-                      {deletingId === item.id ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
-                    </button>
-                    <div className="history-card-top">
-                      <span className={`status-badge ${item.status}`}>{statusLabel(item.status)}</span>
-                      <span className="history-date">{formatDate(item.created_at)}</span>
-                    </div>
-                    <h3>{item.name}</h3>
-                    {isAdmin && item.faena_name && <span className="history-faena">{item.faena_name}</span>}
-                    <p>{item.segment}</p>
-                    <div className="history-card-stats">
-                      <span>{item.image_count} imágenes</span>
-                      <span>{item.detection_count} hallazgos</span>
-                      <span>{item.confirmed_count} confirmados</span>
-                    </div>
-                    {(item.criticidad_critico_count + item.criticidad_moderado_count + item.criticidad_optimo_count) > 0 && (
-                      <div className="history-card-semaphore">
-                        {item.criticidad_critico_count > 0 && <span className="mini-crit-chip critico"><i />{item.criticidad_critico_count}</span>}
-                        {item.criticidad_moderado_count > 0 && <span className="mini-crit-chip moderado"><i />{item.criticidad_moderado_count}</span>}
-                        {item.criticidad_optimo_count > 0 && <span className="mini-crit-chip optimo"><i />{item.criticidad_optimo_count}</span>}
-                      </div>
-                    )}
-                    <span className="history-open">Abrir misión </span>
-                  </div>
-                ))}
+              <div className="card history-table-card">
+                <table className="history-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Misión</th>
+                      {isAdmin && <th scope="col">Faena</th>}
+                      <th scope="col">Fecha</th>
+                      <th scope="col">Imágenes</th>
+                      <th scope="col">Hallazgos</th>
+                      <th scope="col">Confirmados</th>
+                      <th scope="col">Criticidad</th>
+                      <th scope="col">Estado</th>
+                      <th scope="col"><span className="sr-only">Acciones</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleMissions.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <button type="button" className="history-name" onClick={() => openMission(item.id)}>{item.name}</button>
+                          <small>{item.segment}</small>
+                        </td>
+                        {isAdmin && <td>{item.faena_name ?? "—"}</td>}
+                        <td>{formatDate(item.created_at)}</td>
+                        <td>{item.image_count}</td>
+                        <td>{item.detection_count}</td>
+                        <td>{item.confirmed_count}</td>
+                        <td>
+                          {(item.criticidad_critico_count + item.criticidad_moderado_count + item.criticidad_optimo_count) > 0 ? (
+                            <div className="history-card-semaphore">
+                              {item.criticidad_critico_count > 0 && <span className="mini-crit-chip critico" title="Imágenes críticas"><i />{item.criticidad_critico_count}</span>}
+                              {item.criticidad_moderado_count > 0 && <span className="mini-crit-chip moderado" title="Imágenes moderadas"><i />{item.criticidad_moderado_count}</span>}
+                              {item.criticidad_optimo_count > 0 && <span className="mini-crit-chip optimo" title="Imágenes óptimas"><i />{item.criticidad_optimo_count}</span>}
+                            </div>
+                          ) : <span className="muted">Sin clasificar</span>}
+                        </td>
+                        <td><span className={`status-badge ${item.status}`}>{statusLabel(item.status)}</span></td>
+                        <td className="history-actions">
+                          <button type="button" className="button secondary" onClick={() => openMission(item.id)}>Abrir</button>
+                          <button
+                            type="button"
+                            className="history-delete"
+                            aria-label={`Eliminar misión ${item.name}`}
+                            title="Eliminar misión"
+                            disabled={deletingId === item.id}
+                            onClick={() => handleDeleteMission(item.id, item.name)}
+                          >
+                            {deletingId === item.id ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (faenaFiltro || historyFrom || historyTo || historySegment.trim() || historyName.trim()) ? (
               <div className="card history-empty"><strong>No hay misiones que coincidan con los filtros.</strong></div>
@@ -1052,8 +1085,8 @@ export default function App() {
           <section className="hero">
             <div>
            
-              <h1>Dashboard operacional</h1>
-              <p>Monitorea la criticidad de los hallazgos en los caminos mineros, revisa su ubicación en el mapa y compara su evolución entre inspecciones.</p>
+              <h1>Dashboard</h1>
+              <p>Estado de los caminos según las misiones revisadas: hallazgos, ubicación y evolución entre inspecciones.</p>
             </div>
           </section>
 
@@ -1279,7 +1312,15 @@ export default function App() {
           <section className="hero">
             <div>
             
-              <h1>Inspección del camino</h1>
+              {mission ? <>
+                <button type="button" className="crumb" onClick={goToHistory}>Misiones /</button>
+                <h1>{mission.name}</h1>
+                <p>{mission.segment} · {formatDate(mission.created_at)} · {mission.images.length} {mission.images.length === 1 ? "imagen" : "imágenes"}</p>
+              </> : <>
+                <button type="button" className="crumb" onClick={goToHistory}>Misiones /</button>
+                <h1>Nueva misión</h1>
+                <p>Sube las fotos de un vuelo y analízalas para revisar las rocas en la pista y el ancho del camino.</p>
+              </>}
             </div>
           </section>
 
@@ -1405,9 +1446,38 @@ export default function App() {
           )}
 
           {view === "review" && mission && selectedImage && (
+            <section className="workspace tramo-strip" aria-labelledby="tramo-title">
+              <div className="tramo-head">
+                <h2 id="tramo-title">Recorrido del tramo</h2>
+                <span>Imágenes en orden, coloreadas según el ancho medido</span>
+              </div>
+              <div className="tramo-list">
+                {orderedImages.map((image, index) => {
+                  const onRoad = image.detections.filter((item) => item.label !== OFF_ROAD_LABEL && item.review_status !== "rejected" && item.confidence >= threshold).length;
+                  const width = image.road_width;
+                  return (
+                    <button key={image.id} type="button" aria-pressed={image.id === selectedImage.id}
+                      className={`tramo-item ${width ? widthClass(width.estado) : "sin"}`}
+                      onClick={() => setSelectedImageId(image.id)} title={image.filename}>
+                      <img loading="lazy" src={api.imageUrl(image.image_url)} alt="" />
+                      <span>
+                        <strong>{index + 1} · {image.filename}</strong>
+                        <small>
+                          {width?.ancho_min_m != null ? `${width.ancho_min_m.toFixed(1).replace(".", ",")} m` : "Sin ancho"}
+                          {" · "}{onRoad} {onRoad === 1 ? "roca" : "rocas"}
+                        </small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {view === "review" && mission && selectedImage && (
             <section className="workspace review-layout fade-in-view">
               <aside className="card filters-card">
-                <div className="card-title compact"><div><span className="overline">Filtros</span><h2>Hallazgos</h2></div></div>
+                <div className="card-title compact"><div><h2>Mostrar</h2></div></div>
                 <div className="filter-list">
                   {availableLabels.map((label) => <button key={label} className={enabledLabels.includes(label) ? "enabled" : ""} onClick={() => toggleLabel(label)}><i style={{ background: colorForLabel[label] ?? fallbackColor }} /><span>{label}</span><strong>{imageDetections.filter((item) => item.label === label).length}</strong><em>{enabledLabels.includes(label) && <Check size={11} />}</em></button>)}
                 </div>
@@ -1436,39 +1506,32 @@ export default function App() {
                   </ReviewImageZoom>
                   <div className="viewer-nav"><button onClick={() => selectRelative(-1)}> Anterior</button><span>{orderedImages.findIndex((image) => image.id === selectedImage.id) + 1} / {orderedImages.length}</span><button onClick={() => selectRelative(1)}>Siguiente </button></div>
                 </div>
-                <section className="card mission-gallery" aria-labelledby="mission-gallery-title">
-                  <div className="card-title compact">
-                    <h2 id="mission-gallery-title">Imágenes de la misión</h2>
-                    <span className="pill">{orderedImages.length}</span>
-                  </div>
-                  <div className="mission-gallery-grid">
-                    {orderedImages.map((image, index) => (
-                      <button key={image.id} type="button" aria-pressed={image.id === selectedImage.id}
-                        onClick={() => setSelectedImageId(image.id)} title={image.filename}>
-                        <img loading="lazy" src={api.imageUrl(image.analysis_url ?? image.image_url)} alt="" />
-                        <strong>{index + 1}. {image.filename}</strong>
-                        <small>{image.detections.length} {image.detections.length === 1 ? "hallazgo" : "hallazgos"}</small>
-                      </button>
-                    ))}
-                  </div>
-                </section>
               </div>
 
               <aside className="card review-card">
                 {imageView !== "rocas" && selectedImage.road_width && (
                   <RoadWidthCard width={selectedImage.road_width} />
                 )}
-                <div className="card-title compact"><div><span className="overline">Imagen actual</span><h2>Revisión</h2></div><span className="pill">{selectedImage.detections.length}</span></div>
+                <div className="card-title compact"><div><h2>Rocas en la pista</h2><small className="card-subtitle">Van al informe</small></div><span className="pill">{imageDetections.filter((item) => item.label !== OFF_ROAD_LABEL).length}</span></div>
                 <div className="detection-list">
-                  {selectedImage.detections.map((item, index) => <div className={`detection-item ${item.review_status}${item.id === evidenceDetectionId ? " linked-detection" : ""}`} key={item.id} style={{ ["--i" as string]: index } as any}>
-                    <div><i style={{ background: colorForLabel[item.label] ?? fallbackColor }} /><strong>{item.label}</strong><span>{confidence(item.confidence)}</span></div>
-                    <div className="confidence-line"><span style={{ width: confidence(item.confidence), background: colorForLabel[item.label] ?? fallbackColor }} /></div>
-                    <span className="status-pill" style={{ marginTop: 2, background: item.review_status === "confirmed" ? "#e2f6f2" : item.review_status === "rejected" ? "#fdecea" : "#fef3c7", color: item.review_status === "confirmed" ? "#167d72" : item.review_status === "rejected" ? "#c0392b" : "#a16207" }}>
-                      {item.review_status === "confirmed" ? "Confirmado" : item.review_status === "rejected" ? "Descartado" : "Pendiente"}
-                    </span>
-                  </div>)}
+                  {imageDetections.filter((item) => item.label !== OFF_ROAD_LABEL).map((item, index) => (
+                    <div className={`detection-item ${item.review_status}${item.id === evidenceDetectionId ? " linked-detection" : ""}`} key={item.id}>
+                      <i style={{ background: colorForLabel[item.label] ?? fallbackColor }} />
+                      <span className="detection-name">Roca {index + 1} <small>{confidence(item.confidence)}</small></span>
+                      <button type="button" className={`review-toggle confirm${item.review_status === "confirmed" ? " on" : ""}`}
+                        aria-pressed={item.review_status === "confirmed"} aria-label={`Confirmar roca ${index + 1}`} title="Confirmar"
+                        disabled={reviewBusyId === item.id} onClick={() => reviewFinding(item, "confirmed")}><Check size={16} /></button>
+                      <button type="button" className={`review-toggle reject${item.review_status === "rejected" ? " on" : ""}`}
+                        aria-pressed={item.review_status === "rejected"} aria-label={`Descartar roca ${index + 1}`} title="Descartar"
+                        disabled={reviewBusyId === item.id} onClick={() => reviewFinding(item, "rejected")}><X size={16} /></button>
+                    </div>
+                  ))}
+                  {!imageDetections.some((item) => item.label !== OFF_ROAD_LABEL) && <p className="muted">Sin rocas en la pista en esta imagen.</p>}
+                  {imageDetections.some((item) => item.label === OFF_ROAD_LABEL) && (
+                    <p className="muted">{imageDetections.filter((item) => item.label === OFF_ROAD_LABEL).length} rocas fuera de la pista se muestran solo como referencia.</p>
+                  )}
                 </div>
-                <button className="button primary full" onClick={() => setView("report")}> Preparar informe</button>
+                <button className="button primary full" onClick={() => setView("report")}>Generar informe</button>
 
                 <div className="review-criticality">
                   <div className="review-criticality-head">
@@ -1530,7 +1593,7 @@ export default function App() {
       )}
       </AnimatePresence>
 
-      <footer><span>NeumaDiesel</span></footer>
     </main>
+    </div>
   );
 }

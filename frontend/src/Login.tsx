@@ -41,17 +41,12 @@ export default function Login({ onLogin }: { onLogin: (session: Session) => void
         >
           <div className="brand">
             <span className="brand-icon"><img src={logoIcon} alt="NeumaDiesel" /></span>
-            <span><strong>NEUMADIESEL</strong><small>Visión de caminos</small></span>
+            <span><strong>NeumaVision</strong><small>NeumaDiesel</small></span>
           </div>
           <div>
-            <h1>Inspección inteligente de <span>pistas mineras</span></h1>
-            <p>Revisa los hallazgos detectados por el dron en los caminos de tu faena, su criticidad y su ubicación en el mapa.</p>
+            <h1>Los caminos de tu faena, vistos desde el dron.</h1>
+            <p>Rocas sobre la pista y ancho para dos CAEX, foto por foto, listos para el informe de mantención.</p>
           </div>
-          <ul>
-            <li>Hallazgos clasificados por criticidad</li>
-            <li>Mapa georreferenciado de cada anomalía</li>
-            <li>Informes descargables</li>
-          </ul>
         </motion.div>
 
         <motion.form
@@ -61,8 +56,7 @@ export default function Login({ onLogin }: { onLogin: (session: Session) => void
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.55, delay: 0.12, ease: "easeOut" }}
         >
-          <span className="overline">Acceso faena</span>
-          <h2>Inicia sesión</h2>
+                    <h2>Inicia sesión</h2>
           <p className="login-sub">Ingresa con las credenciales entregadas por NeumaDiesel.</p>
 
           {error && <div className="login-error">{error}</div>}
