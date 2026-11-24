@@ -682,7 +682,6 @@ footer span:last-child { display: flex; align-items: center; gap: 5px; }
 .admin-accounts { padding: 22px; }
 .admin-accounts-title { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 16px; }
 .admin-accounts-title h2 { margin: 4px 0 0; }
-.admin-accounts-title p { max-width: 430px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .admin-security-note { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid rgba(250,204,21,.28); border-radius: 10px; background: rgba(250,204,21,.08); color: #665315; font-size: 13px; line-height: 1.55; }
 .admin-security-note svg { flex: 0 0 auto; color: #b08813; }
 .admin-accounts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
@@ -967,7 +966,6 @@ body { background: #ebeeec; }
 .jade-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
 .jade-header > div { flex: 1 1 260px; }
 .jade-header h2 { margin: 0; font-size: 20px; font-weight: 750; font-stretch: 112%; }
-.jade-header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 .jade-icon, .jade-shutdown-icon { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: #1d2730; color: #f2b705; }
 .jade-status { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; font-size: 14px; font-weight: 650; background: #ebeeec; color: #3e4a52; }
 .jade-status i { width: 9px; height: 9px; border-radius: 50%; background: #8c979c; }

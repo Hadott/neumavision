@@ -111,7 +111,7 @@ function AccountCard({
 
       <form className="admin-password-form" onSubmit={resetPassword}>
         <strong>Restablecer contraseña</strong>
-        <p>La contraseña anterior no se puede consultar. Asigna una nueva de al menos 8 caracteres.</p>
+        <p>Mínimo 8 caracteres.</p>
         <label>
           <span>Nueva contraseña temporal</span>
           <div className="admin-password-input">
@@ -186,11 +186,10 @@ export default function AdminAccounts({ onViewMissions }: { onViewMissions: (acc
   return (
     <section className="workspace admin-accounts">
       <header className="admin-accounts-title">
-        <div><span className="overline">Administración</span><h2>Cuentas y accesos</h2></div>
-        <p>Crea cuentas de faena, actualiza sus datos, revisa las misiones asignadas o establece una contraseña nueva.</p>
+        <h2>Cuentas y accesos</h2>
       </header>
       <div className="admin-security-note">
-        Las contraseñas se guardan como hash y no se pueden recuperar. Al crear o restablecer una, entrégala por un canal privado.
+        Comparte las contraseñas nuevas por un canal privado.
       </div>
       {error && <div className="admin-account-message error">{error}</div>}
       {loading ? (

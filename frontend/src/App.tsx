@@ -908,7 +908,7 @@ export default function App() {
                 ? "Cargando los modelos. Puede tardar unos minutos."
                 : inferenceHealth.idle_timeout_seconds === 0
                   ? "Apagado automático desactivado."
-                  : `Se enciende al analizar y se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin uso.`}
+                  : `Apagado automático tras ${inferenceHealth.idle_timeout_seconds / 60} min.`}
             </small>
           )}
           {isAdmin && screen !== "accounts" && inferenceHealth?.idle_timeout_seconds != null &&
@@ -936,7 +936,6 @@ export default function App() {
           <section className="hero">
             <div>
               <h1>Administración</h1>
-              <p>Gestiona el servicio de inferencia y las cuentas de Neumavision.</p>
             </div>
           </section>
           <section className="workspace" aria-labelledby="inference-settings-title">
@@ -945,7 +944,6 @@ export default function App() {
                 <span className="jade-icon" aria-hidden="true"><Server size={22} /></span>
                 <div>
                   <h2 id="inference-settings-title">Jade</h2>
-                  <p>Servidor con GPU en AWS que ejecuta los modelos de rocas y pista</p>
                 </div>
                 <span className={`jade-status ${jadeTone(inferenceHealth?.status)}`} role="status">
                   <i aria-hidden="true" />{inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
@@ -997,11 +995,7 @@ export default function App() {
                     Apagado automático
                     {idleTimeout != null && <span className={`jade-pill ${idleTimeout > 0 ? "on" : "off"}`}>{idleTimeout > 0 ? "Activado" : "Desactivado"}</span>}
                   </h3>
-                  <p role="status">
-                    {idleTimeout == null ? "Control no disponible en este servidor."
-                      : idleTimeout > 0 ? `Jade se apaga tras ${idleTimeout / 60} min sin análisis, para no pagar horas de GPU sin uso.`
-                      : "Jade queda encendido aunque no haya análisis. Actívalo para no pagar horas de GPU sin uso."}
-                  </p>
+                  {idleTimeout == null && <p role="status">Control no disponible.</p>}
                 </div>
                 {idleTimeout != null && (
                   <div className="jade-shutdown-controls">
@@ -1033,9 +1027,7 @@ export default function App() {
         <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
             <div>
-              
               <h1>Misiones</h1>
-              <p>Cada misión es un vuelo de dron sobre un tramo. Ábrela para revisar sus imágenes.</p>
             </div>
           </section>
 
@@ -1144,9 +1136,7 @@ export default function App() {
         <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
             <div>
-           
               <h1>Dashboard</h1>
-              <p>Estado de los caminos según las misiones revisadas: hallazgos, ubicación y evolución entre inspecciones.</p>
             </div>
           </section>
 
@@ -1283,7 +1273,7 @@ export default function App() {
                 <div className="card dash-map-card">
                   <div className="dash-map-heading">
                     <div>
-                      <span><strong>Mapa de hallazgos</strong><small>Sectores del camino con anomalías detectadas</small></span>
+                      <span><strong>Mapa de hallazgos</strong></span>
                     </div>
                     <span className="pill">{dashVisible.length} en vista</span>
                   </div>
