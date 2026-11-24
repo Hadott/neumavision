@@ -9,9 +9,9 @@ from app.api.missions import router as missions_router
 from app.api.dashboard import router as dashboard_router
 from app.config import settings
 from app.database import ensure_development_faena, initialize_database
-from app.schemas import HealthRead, InferenceHealthRead
+from app.schemas import HealthRead, InferenceAutoShutdownUpdate, InferenceHealthRead, InferenceInstanceRead
 from app.services.auth import CurrentFaena, is_admin
-from app.services.jade import IDLE_CHECK_SECONDS, jade
+from app.services.jade import IDLE_CHECK_SECONDS, JadeUnavailable, jade
 
 
 async def monitor_jade(stop: asyncio.Event) -> None:
@@ -30,7 +30,7 @@ async def lifespan(_: FastAPI):
     ensure_development_faena()
     stop = asyncio.Event()
     monitor = None
-    if settings.detector_mode == "remote" and settings.jade_instance_id and settings.jade_idle_timeout_seconds:
+    if settings.detector_mode == "remote" and settings.jade_instance_id:
         monitor = asyncio.create_task(monitor_jade(stop))
     try:
         yield
@@ -66,7 +66,7 @@ def inference_health(cuenta: CurrentFaena) -> InferenceHealthRead:
     status = jade.status()
     return InferenceHealthRead(
         status=status,
-        idle_timeout_seconds=settings.jade_idle_timeout_seconds if managed else None,
+        idle_timeout_seconds=jade.idle_timeout_seconds if managed else None,
         start_error=jade.manual_start_error if managed and status != "up" else None,
     )
 
@@ -79,6 +79,27 @@ def start_inference(cuenta: CurrentFaena) -> dict[str, str]:
         raise HTTPException(409, "El encendido de Jade no está configurado.")
     jade.request_start()
     return {"status": "accepted"}
+
+
+@app.put(f"{settings.api_prefix}/inference/auto-shutdown", tags=["system"])
+def update_inference_auto_shutdown(payload: InferenceAutoShutdownUpdate, cuenta: CurrentFaena) -> dict[str, int]:
+    if not is_admin(cuenta):
+        raise HTTPException(403, "Solo un administrador puede configurar el apagado automático de Jade.")
+    if settings.detector_mode != "remote" or not settings.jade_instance_id:
+        raise HTTPException(409, "La administración de Jade no está configurada.")
+    return {"idle_timeout_seconds": jade.set_auto_shutdown(payload.enabled, payload.idle_timeout_seconds)}
+
+
+@app.get(f"{settings.api_prefix}/inference/instance", response_model=InferenceInstanceRead, tags=["system"])
+def inference_instance(cuenta: CurrentFaena) -> InferenceInstanceRead:
+    if not is_admin(cuenta):
+        raise HTTPException(403, "Solo un administrador puede consultar la instancia de Jade.")
+    if settings.detector_mode != "remote" or not settings.jade_instance_id:
+        raise HTTPException(409, "La administración de Jade no está configurada.")
+    try:
+        return jade.instance_details()
+    except JadeUnavailable as error:
+        raise HTTPException(502, str(error)) from error
 
 
 app.include_router(auth_router, prefix=settings.api_prefix)

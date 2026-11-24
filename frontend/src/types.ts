@@ -104,6 +104,19 @@ export type InferenceHealth = {
   start_error?: string | null;
 };
 
+export type InferenceInstance = {
+  instance_type: string;
+  region: string;
+  availability_zone: string;
+  specifications_available: boolean;
+  specifications_url: string | null;
+  vcpus: number | null;
+  memory_mib: number | null;
+  gpus: { name: string; count: number; memory_mib: number }[];
+  network_performance: string | null;
+  local_storage_gb: number | null;
+};
+
 export type DetectionProgress = {
   phase: "starting" | "processing" | "saving";
   completed: number;

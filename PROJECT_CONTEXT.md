@@ -563,8 +563,12 @@ Para esos resultados, el visor recupera la zona de la tarjeta de la foto origina
 
 Nina puede encender Jade bajo demanda usando el rol EC2. Jade precarga ambos modelos YOLO26 al arrancar y Nina espera su endpoint de salud antes de enviar imágenes.
 Un único proceso de Nina coordina los trabajos y solicita apagar Jade tras
-20 minutos sin trabajos de inferencia. El visor muestra el estado de EC2 y
-la disponibilidad de los modelos. Variables, permisos y despliegue en
+20 minutos sin trabajos de inferencia de forma predeterminada. El visor muestra
+el estado de EC2 y la disponibilidad de los modelos. El panel de Administración
+muestra el tipo de instancia y sus especificaciones de AWS, permite encender
+Jade y configurar el tiempo de apagado durante la ejecución de Nina. Desde
+Administración se puede abrir el historial de misiones y filtrar por faena,
+fecha de creación, tramo y nombre de misión. Variables, permisos y despliegue en
 `inference/README.md`.
 
 Actualmente:

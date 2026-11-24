@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictBool
 
 
 ReviewStatus = Literal["pending", "confirmed", "rejected"]
@@ -125,6 +125,30 @@ class InferenceHealthRead(BaseModel):
     status: str
     idle_timeout_seconds: int | None
     start_error: str | None = None
+
+
+class InferenceAutoShutdownUpdate(BaseModel):
+    enabled: StrictBool
+    idle_timeout_seconds: int | None = Field(default=None, strict=True, ge=1, le=86400)
+
+
+class InferenceGpuRead(BaseModel):
+    name: str
+    count: int
+    memory_mib: int
+
+
+class InferenceInstanceRead(BaseModel):
+    instance_type: str
+    region: str
+    availability_zone: str
+    specifications_available: bool = False
+    specifications_url: str | None = None
+    vcpus: int | None = None
+    memory_mib: int | None = None
+    gpus: list[InferenceGpuRead] = Field(default_factory=list)
+    network_performance: str | None = None
+    local_storage_gb: int | None = None
 
 
 class DetectionProgressRead(BaseModel):

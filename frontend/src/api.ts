@@ -1,7 +1,8 @@
-import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, Session } from "./types";
 
 // Por defecto la API se llama en la misma dirección del sitio; Vite la redirige al backend.
 export const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
+const LOGIN_TIMEOUT_MS = 15_000;
 
 // ---- Sesión ----
 const SESSION_KEY = "neumavision.session";
@@ -74,13 +75,33 @@ export const api = {
   health: () => request<Health>("/health"),
   startInference: () => request<{ status: "accepted" }>("/inference/start", { method: "POST" }),
   inferenceHealth: () => request<InferenceHealth>("/inference/health"),
-
-  login: (correo: string, contrasena: string) =>
-    request<Session>("/auth/login", {
-      method: "POST",
+  inferenceInstance: () => request<InferenceInstance>("/inference/instance"),
+  setInferenceAutoShutdown: (enabled: boolean, idleTimeoutSeconds?: number) =>
+    request<{ idle_timeout_seconds: number }>("/inference/auto-shutdown", {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ correo, contrasena })
+      body: JSON.stringify({ enabled, idle_timeout_seconds: idleTimeoutSeconds }),
     }),
+
+  login: async (correo: string, contrasena: string) => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), LOGIN_TIMEOUT_MS);
+    try {
+      return await request<Session>("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ correo, contrasena }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error("El servidor tardó demasiado en responder. Intenta de nuevo.");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  },
 
   me: () => request<Account>("/auth/me"),
 

@@ -23,6 +23,77 @@ def instance(state):
     return {"Reservations": [{"Instances": [{"State": {"Name": state}}]}]}
 
 
+def test_admin_controls_auto_shutdown(manager, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.models import Faena
+    from app.services.auth import get_current_faena
+
+    monkeypatch.setattr(main, "jade", manager)
+    monkeypatch.setattr(settings, "jade_idle_timeout_seconds", 0)
+    monkeypatch.setattr(manager.ec2.describe_instances, "return_value", instance("running"))
+    clock = Mock(return_value=100)
+    monkeypatch.setattr(lifecycle, "monotonic", clock)
+    actor = Faena(rol="faena")
+    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: actor)
+    client = TestClient(main.app)
+    url = f"{settings.api_prefix}/inference/auto-shutdown"
+
+    assert client.put(url, json={"enabled": True}).status_code == 403
+    instance_url = f"{settings.api_prefix}/inference/instance"
+    assert client.get(instance_url).status_code == 403
+    actor.rol = "admin"
+    assert client.put(url, json={"enabled": "true"}).status_code == 422
+    assert client.put(url, json={"enabled": True, "idle_timeout_seconds": 86401}).status_code == 422
+    assert client.put(url, json={"enabled": True}).json() == {"idle_timeout_seconds": 1200}
+    manager.stop_if_idle()
+    clock.return_value = 1300
+    assert client.put(url, json={"enabled": False}).json() == {"idle_timeout_seconds": 0}
+    manager.stop_if_idle()
+    manager.ec2.stop_instances.assert_not_called()
+
+    assert client.put(url, json={"enabled": True, "idle_timeout_seconds": 180}).json() == {"idle_timeout_seconds": 180}
+    manager.stop_if_idle()
+    clock.return_value = 1479
+    manager.stop_if_idle()
+    manager.ec2.stop_instances.assert_not_called()
+    clock.return_value = 1480
+    manager.stop_if_idle()
+    manager.ec2.stop_instances.assert_called_once_with(InstanceIds=[settings.jade_instance_id])
+
+    response = instance("stopped")
+    response["Reservations"][0]["Instances"][0].update(
+        InstanceType="g6.xlarge", Placement={"AvailabilityZone": "us-east-2a"},
+    )
+    manager.ec2.describe_instances.return_value = response
+    manager.ec2.describe_instance_types.return_value = {"InstanceTypes": [{
+        "VCpuInfo": {"DefaultVCpus": 4},
+        "MemoryInfo": {"SizeInMiB": 16384},
+        "GpuInfo": {"Gpus": [{"Name": "L4", "Count": 1, "MemoryInfo": {"SizeInMiB": 24576}}]},
+    }]}
+    details = client.get(instance_url).json()
+    assert details["instance_type"] == "g6.xlarge"
+    assert details["vcpus"] == 4
+    assert details["memory_mib"] == 16384
+    assert details["gpus"] == [{"name": "L4", "count": 1, "memory_mib": 24576}]
+    manager.ec2.describe_instance_types.assert_called_once_with(InstanceTypes=["g6.xlarge"])
+
+    manager.ec2.describe_instance_types.side_effect = ClientError(
+        {"Error": {"Code": "UnauthorizedOperation"}}, "DescribeInstanceTypes",
+    )
+    details = client.get(instance_url).json()
+    assert details["instance_type"] == "g6.xlarge"
+    assert details["specifications_available"] is True
+    assert details["specifications_url"].startswith("https://docs.aws.amazon.com/")
+    assert details["local_storage_gb"] == 250
+
+    response["Reservations"][0]["Instances"][0]["InstanceType"] = "g6.2xlarge"
+    details = client.get(instance_url).json()
+    assert details["instance_type"] == "g6.2xlarge"
+    assert details["specifications_available"] is False
+
+
 def test_wait_for_capacity_and_readiness_and_stop_after_idle(manager, monkeypatch):
     manager.ec2.describe_instances.side_effect = [
         instance("stopped"), instance("stopped"), instance("pending"),

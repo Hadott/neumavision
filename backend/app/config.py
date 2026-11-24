@@ -5,6 +5,8 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+DEFAULT_JADE_IDLE_TIMEOUT_SECONDS = 1200
+
 
 class Settings(BaseSettings):
     app_name: str = "NeumaDiesel Vision API"
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     jade_instance_id: str = Field(default="", pattern=r"^(?:i-[0-9a-f]{8}(?:[0-9a-f]{9})?)?$")
     jade_region: str = "us-east-2"
     jade_start_timeout: float = Field(default=300, gt=0)
-    jade_idle_timeout_seconds: int = Field(default=1200, ge=0)
+    jade_idle_timeout_seconds: int = Field(default=DEFAULT_JADE_IDLE_TIMEOUT_SECONDS, ge=0)
     analysis_s3_bucket: str = ""
     # DETECTOR_MODE=neumavision: rocas (YOLO26) + pista (RF-DETR Seg) + ancho de pista
     rock_model_path: Path = Path("./models/rocas.pt")

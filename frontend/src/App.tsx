@@ -16,7 +16,7 @@ import DashboardStats from "./DashboardStats";
 import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
 import Login from "./Login";
 import MapPanel from "./MapPanel";
-import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, RoadWidth, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, RoadWidth, Session } from "./types";
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
@@ -38,8 +38,8 @@ type Busy = "upload" | "detect" | "report" | null;
 type DashReview = "pending" | "confirmed";
 
 const inferenceStatusLabel: Record<InferenceHealth["status"], string> = {
-  up: "Encendida · Up",
-  down: "Apagada · Down",
+  up: "Servicio encendido",
+  down: "Servicio apagado",
   starting: "Encendiendo",
   waiting_capacity: "Esperando capacidad de AWS",
   stopping: "Apagando",
@@ -214,6 +214,12 @@ export default function App() {
   const [inferenceHealth, setInferenceHealth] = useState<InferenceHealth | null>(null);
   const [startingInference, setStartingInference] = useState(false);
   const [inferenceStartError, setInferenceStartError] = useState("");
+  const [savingAutoShutdown, setSavingAutoShutdown] = useState(false);
+  const [autoShutdownError, setAutoShutdownError] = useState("");
+  const [idleMinutes, setIdleMinutes] = useState("");
+  const [inferenceInstance, setInferenceInstance] = useState<InferenceInstance | null>(null);
+  const [instanceError, setInstanceError] = useState("");
+  const idleTimeout = inferenceHealth?.idle_timeout_seconds;
   const [location, setLocation] = useState(currentLocation);
   const [path, query = ""] = location.split("?", 2);
   const missionPath = path === NEW_MISSION_PATH ? null : /^\/misiones\/([a-zA-Z0-9_-]+)$/.exec(path)?.[1];
@@ -245,6 +251,11 @@ export default function App() {
   const [enabledLabels, setEnabledLabels] = useState<string[]>([]);
   const [missions, setMissions] = useState<MissionSummary[]>([]);
   const [missionsLoading, setMissionsLoading] = useState(false);
+  const missionListRequest = useRef(0);
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historySegment, setHistorySegment] = useState("");
+  const [historyName, setHistoryName] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [criticalityBusyId, setCriticalityBusyId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -268,6 +279,34 @@ export default function App() {
     : path === "/cuentas" && isAdmin ? "accounts"
     : newMission || missionPath ? "workspace" : "history";
   const mission = loadedMission?.id === missionPath ? loadedMission : null;
+  const visibleMissions = useMemo(() => {
+    const from = historyFrom ? new Date(`${historyFrom}T00:00:00`) : null;
+    const until = historyTo ? new Date(`${historyTo}T00:00:00`) : null;
+    if (until) until.setDate(until.getDate() + 1);
+    const tramo = historySegment.trim().toLocaleLowerCase("es-CL");
+    const name = historyName.trim().toLocaleLowerCase("es-CL");
+    return missions.filter((item) => {
+      const createdAt = new Date(item.created_at);
+      return (!isAdmin || !faenaFiltro || item.faena_id === faenaFiltro)
+        && (!from || createdAt >= from)
+        && (!until || createdAt < until)
+        && (!tramo || item.segment.toLocaleLowerCase("es-CL").includes(tramo))
+        && (!name || item.name.toLocaleLowerCase("es-CL").includes(name));
+    });
+  }, [missions, isAdmin, faenaFiltro, historyFrom, historyTo, historySegment, historyName]);
+
+  useEffect(() => {
+    if (screen !== "accounts") return;
+    let active = true;
+    setInferenceInstance(null);
+    setInstanceError("");
+    api.inferenceInstance().then((instance) => {
+      if (active) setInferenceInstance(instance);
+    }).catch((requestError) => {
+      if (active) setInstanceError(requestError instanceof Error ? requestError.message : "No se pudo consultar la instancia.");
+    });
+    return () => { active = false; };
+  }, [screen, session?.token]);
 
   useEffect(() => {
     const updateLocation = () => {
@@ -467,14 +506,18 @@ export default function App() {
   const selectedCriticality = selectedFinding ? criticalityOf(selectedFinding.confidence, selectedFinding.label) : null;
 
   async function refreshMissions() {
+    const request = ++missionListRequest.current;
     setMissionsLoading(true);
     try {
       const list = await api.listMissions(isAdmin ? faenaFiltro || undefined : undefined);
-      setMissions(list);
+      if (request === missionListRequest.current) setMissions(list);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No fue posible cargar el historial de misiones.");
+      if (request === missionListRequest.current) {
+        setMissions([]);
+        setError(requestError instanceof Error ? requestError.message : "No fue posible cargar el historial de misiones.");
+      }
     } finally {
-      setMissionsLoading(false);
+      if (request === missionListRequest.current) setMissionsLoading(false);
     }
   }
 
@@ -520,6 +563,20 @@ export default function App() {
     }
   }
 
+  async function changeAutoShutdown(enabled: boolean, idleTimeoutSeconds?: number) {
+    setSavingAutoShutdown(true);
+    setAutoShutdownError("");
+    try {
+      const result = await api.setInferenceAutoShutdown(enabled, idleTimeoutSeconds);
+      setInferenceHealth((current) => current && { ...current, ...result });
+      if (enabled) setIdleMinutes("");
+    } catch (requestError) {
+      setAutoShutdownError(requestError instanceof Error ? requestError.message : "No se pudo cambiar el apagado automático.");
+    } finally {
+      setSavingAutoShutdown(false);
+    }
+  }
+
   function goToHistory() {
     navigate(HISTORY_PATH);
     setError("");
@@ -532,10 +589,14 @@ export default function App() {
   }
 
   function logout(message = "") {
+    missionListRequest.current += 1;
     setSession(null);
     setSessionState(null);
     setInferenceHealth(null);
     setInferenceStartError("");
+    setIdleMinutes("");
+    setAutoShutdownError("");
+    clearHistoryFilters();
     setFaenas([]);
     setFaenaFiltro("");
     setMissionFaena("");
@@ -557,9 +618,17 @@ export default function App() {
   }
 
   function viewAccountMissions(account: Account) {
+    clearHistoryFilters();
     setFaenaFiltro(account.id);
     navigate(HISTORY_PATH);
     setError("");
+  }
+
+  function clearHistoryFilters() {
+    setHistoryFrom("");
+    setHistoryTo("");
+    setHistorySegment("");
+    setHistoryName("");
   }
 
   function startNewMission() {
@@ -743,7 +812,7 @@ export default function App() {
           <span><strong>NEUMADIESEL</strong><small>Visión de caminos</small></span>
         </button>
         <div className="top-actions">
-          {isAdmin && (
+          {isAdmin && screen !== "history" && (
             <select className="faena-select" value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)} title="Faena visible">
               <option value="">Todas las faenas</option>
               {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
@@ -751,7 +820,7 @@ export default function App() {
           )}
           {screen !== "history" && <button className="button ghost" onClick={goToHistory}>Historial</button>}
           {screen !== "dashboard" && <button className="button ghost" onClick={openDashboard}>Dashboard</button>}
-          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => navigate("/cuentas")}> Cuentas</button>}
+          {isAdmin && screen !== "accounts" && <button className="button ghost" onClick={() => navigate("/cuentas")}>Administración</button>}
           {screen !== "workspace" && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
           {screen === "workspace" && mission && <button className="button ghost" onClick={startNewMission}>Nueva misión</button>}
           <span className="account-chip" title={session.cuenta.correo}>
@@ -777,7 +846,7 @@ export default function App() {
                 : `El arranque puede tardar unos minutos. Se apaga tras ${inferenceHealth.idle_timeout_seconds / 60} min sin inferencias.`}
           </small>
         )}
-        {isAdmin && inferenceHealth?.idle_timeout_seconds != null &&
+        {isAdmin && screen !== "accounts" && inferenceHealth?.idle_timeout_seconds != null &&
           (inferenceHealth.status === "down" || inferenceHealth.status === "unavailable") && (
           <button type="button" className="button secondary" disabled={startingInference} onClick={startInference}>
             {startingInference ? "Solicitando encendido…" : "Encender Jade"}
@@ -794,11 +863,77 @@ export default function App() {
           <section className="hero">
             <div>
               <span className="overline">Administración de plataforma</span>
-              <h1>Usuarios y faenas</h1>
-              <p>Administra los datos de acceso y revisa las misiones de cada cuenta.</p>
+              <h1>Panel de administración</h1>
+              <p>Gestiona el servicio de inferencia y las cuentas de Neumavision.</p>
             </div>
             <div className="architecture"><span>Solo administradores</span></div>
           </section>
+          <section className="workspace admin-accounts" aria-labelledby="inference-settings-title">
+            <header className="admin-accounts-title">
+              <div>
+                <h2 id="inference-settings-title">Jade · Amazon EC2 de inferencia</h2>
+                <p role="status">{inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}</p>
+              </div>
+              {idleTimeout != null && (inferenceHealth?.status === "down" || inferenceHealth?.status === "unavailable") && (
+                <button type="button" className="button secondary" disabled={startingInference} onClick={startInference}>
+                  {startingInference ? "Solicitando encendido…" : "Encender Jade"}
+                </button>
+              )}
+            </header>
+            {instanceError ? <p role="alert">{instanceError}</p> : inferenceInstance ? (
+              <dl className="jade-specs">
+                <div><dt>Tipo de instancia</dt><dd>{inferenceInstance.instance_type}</dd></div>
+                <div><dt>Región y zona</dt><dd>{inferenceInstance.region} · {inferenceInstance.availability_zone}</dd></div>
+                {inferenceInstance.specifications_available && <>
+                  <div><dt>vCPU</dt><dd>{inferenceInstance.vcpus ?? "Sin datos"}</dd></div>
+                  <div><dt>RAM</dt><dd>{inferenceInstance.memory_mib == null ? "Sin datos" : `${inferenceInstance.memory_mib / 1024} GiB`}</dd></div>
+                  <div><dt>GPU</dt><dd>{inferenceInstance.gpus.map((gpu) => `${gpu.count} × ${gpu.name} (${gpu.memory_mib / 1024} GiB por GPU)`).join(", ") || "Sin GPU"}</dd></div>
+                  <div><dt>Red</dt><dd>{inferenceInstance.network_performance ?? "Sin datos"}</dd></div>
+                  {inferenceInstance.local_storage_gb != null && (
+                    <div><dt>Almacenamiento local</dt><dd>{inferenceInstance.local_storage_gb} GB</dd></div>
+                  )}
+                </>}
+              </dl>
+            ) : <p role="status">Consultando la instancia en AWS…</p>}
+            {inferenceInstance?.specifications_url && (
+              <p><a href={inferenceInstance.specifications_url} target="_blank" rel="noreferrer">Ver especificaciones en la ficha oficial de AWS</a></p>
+            )}
+            {inferenceInstance?.specifications_available === false && <p role="status">AWS no devolvió las especificaciones del tipo de instancia.</p>}
+            <form className="admin-accounts-title" onSubmit={(event) => {
+              event.preventDefault();
+              void changeAutoShutdown(true, idleMinutes ? Number(idleMinutes) * 60 : undefined);
+            }}>
+              <div>
+                <h3>Apagado automático</h3>
+                <p role="status">
+                  {idleTimeout == null ? "Control no disponible."
+                    : idleTimeout > 0 ? `Activado. La instancia se apaga tras ${idleTimeout / 60} min sin trabajos de inferencia.`
+                    : "Desactivado. La instancia puede permanecer encendida aunque no haya trabajos de inferencia."}
+                </p>
+              </div>
+              {idleTimeout != null && (
+                <div className="filter-controls">
+                  <label>Minutos de inactividad
+                    <input type="number" min="1" max="1440" step="1" value={idleMinutes}
+                      placeholder={idleTimeout > 0 ? String(idleTimeout / 60) : "Según configuración"}
+                      required={idleTimeout > 0} disabled={savingAutoShutdown}
+                      onChange={(event) => setIdleMinutes(event.target.value)} />
+                  </label>
+                  <button type="submit" className="button secondary" disabled={savingAutoShutdown}>
+                    {savingAutoShutdown ? "Guardando…" : idleTimeout > 0 ? "Guardar tiempo" : "Activar apagado automático"}
+                  </button>
+                  {idleTimeout > 0 && (
+                    <button type="button" className="button ghost" disabled={savingAutoShutdown}
+                      onClick={() => void changeAutoShutdown(false)}>Desactivar apagado automático</button>
+                  )}
+                </div>
+              )}
+            </form>
+            {autoShutdownError && <p role="alert">{autoShutdownError}</p>}
+          </section>
+          <div className="workspace">
+            <button type="button" className="button secondary admin-history-link" onClick={goToHistory}>Ver historial de misiones de faenas</button>
+          </div>
           <AdminAccounts onViewMissions={viewAccountMissions} />
         </motion.div>
       )}
@@ -806,7 +941,7 @@ export default function App() {
         <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
             <div>
-              <span className="overline">Plataforma de inspección RGB</span>
+              
               <h1>Historial de misiones</h1>
               <p>Revisa las misiones ya procesadas o inicia una nueva inspección del camino minero.</p>
             </div>
@@ -816,7 +951,7 @@ export default function App() {
 
           <section className="workspace history-layout">
             <div className="history-toolbar">
-              <div><span className="overline">Misiones</span><h2>{missions.length} registradas</h2></div>
+              <div><span className="overline">Misiones</span><h2>{visibleMissions.length} {visibleMissions.length === 1 ? "misión" : "misiones"}</h2></div>
               <div className="history-toolbar-actions">
                 <button className="button ghost" onClick={refreshMissions} disabled={missionsLoading}>
                   {missionsLoading ? <LoaderCircle className="spin" size={15} /> : null} Actualizar
@@ -824,12 +959,36 @@ export default function App() {
                 <button className="button primary" onClick={startNewMission}>Nueva misión</button>
               </div>
             </div>
+            <div className="filter-controls" role="group" aria-label="Filtros del historial de misiones">
+              <label>Nombre de misión
+                <input type="search" value={historyName} onChange={(event) => setHistoryName(event.target.value)} />
+              </label>
+              {isAdmin && <label>Faena
+                <select value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)}>
+                  <option value="">Todas las faenas</option>
+                  {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+                </select>
+              </label>}
+              <label>Fecha de creación desde
+                <input type="date" value={historyFrom} max={historyTo || undefined} onChange={(event) => setHistoryFrom(event.target.value)} />
+              </label>
+              <label>Hasta
+                <input type="date" value={historyTo} min={historyFrom || undefined} onChange={(event) => setHistoryTo(event.target.value)} />
+              </label>
+              <label>Tramo
+                <input type="search" value={historySegment} onChange={(event) => setHistorySegment(event.target.value)} />
+              </label>
+              <button type="button" className="button ghost" onClick={() => {
+                clearHistoryFilters();
+                if (isAdmin) changeFaenaFiltro("");
+              }}>Limpiar filtros</button>
+            </div>
 
-            {missionsLoading && !missions.length ? (
+            {missionsLoading && !visibleMissions.length ? (
               <SkeletonCards count={6} />
-            ) : missions.length ? (
+            ) : visibleMissions.length ? (
               <div className="history-grid">
-                {missions.map((item) => (
+                {visibleMissions.map((item) => (
                   <div
                     key={item.id}
                     className="card history-card"
@@ -875,6 +1034,8 @@ export default function App() {
                   </div>
                 ))}
               </div>
+            ) : (faenaFiltro || historyFrom || historyTo || historySegment.trim() || historyName.trim()) ? (
+              <div className="card history-empty"><strong>No hay misiones que coincidan con los filtros.</strong></div>
             ) : (
               <div className="card history-empty">
                 <strong>Todavía no hay misiones</strong>
@@ -890,7 +1051,7 @@ export default function App() {
         <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
             <div>
-              <span className="overline">Plataforma de inspección RGB</span>
+           
               <h1>Dashboard operacional</h1>
               <p>Monitorea la criticidad de los hallazgos en los caminos mineros, revisa su ubicación en el mapa y compara su evolución entre inspecciones.</p>
             </div>
@@ -1117,9 +1278,8 @@ export default function App() {
         <motion.div key="workspace" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.22, ease: "easeOut" }}>
           <section className="hero">
             <div>
-              <span className="overline">Plataforma de inspección RGB</span>
+            
               <h1>Inspección del camino</h1>
-              <p>Detecta condiciones que pueden dañar los neumáticos de camiones CAEX y localiza los sectores que requieren mantenimiento.</p>
             </div>
           </section>
 

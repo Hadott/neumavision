@@ -283,7 +283,9 @@ def list_missions(
                 name=mission.nombre,
                 segment=mission.tramo,
                 status=mission.estado,
-                created_at=mission.fecha_creacion,
+                created_at=mission.fecha_creacion.astimezone(timezone.utc)
+                if mission.fecha_creacion.tzinfo
+                else mission.fecha_creacion.replace(tzinfo=timezone.utc),
                 image_count=len(images),
                 detection_count=len(detections),
                 pending_count=sum(1 for item in detections if item.estado_revision == "pending"),

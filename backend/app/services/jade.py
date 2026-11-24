@@ -11,7 +11,8 @@ import httpx
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from app.config import settings
+from app.config import DEFAULT_JADE_IDLE_TIMEOUT_SECONDS, settings
+from app.schemas import InferenceGpuRead, InferenceInstanceRead
 
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,27 @@ class Jade:
         self.manual_start_phase: str | None = None
         self.manual_start_error: str | None = None
         self.idle_since: float | None = None
+        self.idle_timeout_override: int | None = None
+
+    @property
+    def idle_timeout_seconds(self) -> int:
+        timeout = self.idle_timeout_override
+        return settings.jade_idle_timeout_seconds if timeout is None else timeout
+
+    def set_auto_shutdown(self, enabled: bool, idle_timeout_seconds: int | None = None) -> int:
+        with self.lock:
+            timeout = 0
+            if enabled:
+                timeout = (
+                    idle_timeout_seconds
+                    or self.idle_timeout_seconds
+                    or settings.jade_idle_timeout_seconds
+                    or DEFAULT_JADE_IDLE_TIMEOUT_SECONDS
+                )
+            if timeout != self.idle_timeout_seconds:
+                self.idle_timeout_override = timeout
+                self.idle_since = None
+            return timeout
 
     @cached_property
     def ec2(self):
@@ -46,9 +68,50 @@ class Jade:
             connect_timeout=5, read_timeout=5, retries={"total_max_attempts": 2},
         ))
 
-    def instance_state(self) -> str:
+    def describe_instance(self) -> dict:
         result = self.ec2.describe_instances(InstanceIds=[settings.jade_instance_id])
-        return result["Reservations"][0]["Instances"][0]["State"]["Name"]
+        return result["Reservations"][0]["Instances"][0]
+
+    def instance_state(self) -> str:
+        return self.describe_instance()["State"]["Name"]
+
+    def instance_details(self) -> InferenceInstanceRead:
+        try:
+            instance = self.describe_instance()
+            details = InferenceInstanceRead(
+                instance_type=instance["InstanceType"],
+                region=settings.jade_region,
+                availability_zone=instance["Placement"]["AvailabilityZone"],
+            )
+        except (BotoCoreError, ClientError, IndexError, KeyError) as error:
+            logger.warning("No se pudo identificar la instancia de Jade", exc_info=True)
+            raise JadeUnavailable("AWS no pudo devolver el tipo de instancia de Jade.") from error
+        try:
+            specs = self.ec2.describe_instance_types(InstanceTypes=[details.instance_type])["InstanceTypes"][0]
+        except (BotoCoreError, ClientError, IndexError, KeyError):
+            logger.warning("No se pudieron consultar las especificaciones de Jade", exc_info=True)
+            if details.instance_type == "g6.xlarge":
+                # Ficha oficial para el tipo exacto verificado con DescribeInstances.
+                return details.model_copy(update={
+                    "specifications_available": True,
+                    "specifications_url": "https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html",
+                    "vcpus": 4,
+                    "memory_mib": 16 * 1024,
+                    "gpus": [InferenceGpuRead(name="NVIDIA L4", count=1, memory_mib=22 * 1024)],
+                    "network_performance": "Hasta 10 Gbps",
+                    "local_storage_gb": 250,
+                })
+            return details
+        details.specifications_available = True
+        details.vcpus = specs.get("VCpuInfo", {}).get("DefaultVCpus")
+        details.memory_mib = specs.get("MemoryInfo", {}).get("SizeInMiB")
+        details.gpus = [
+            InferenceGpuRead(name=gpu["Name"], count=gpu["Count"], memory_mib=gpu["MemoryInfo"]["SizeInMiB"])
+            for gpu in specs.get("GpuInfo", {}).get("Gpus", [])
+        ]
+        details.network_performance = specs.get("NetworkInfo", {}).get("NetworkPerformance")
+        details.local_storage_gb = specs.get("InstanceStorageInfo", {}).get("TotalSizeInGB")
+        return details
 
     def service_ready(self) -> bool:
         try:
@@ -81,11 +144,9 @@ class Jade:
         }.get(state, "unknown")
 
     def stop_if_idle(self) -> None:
-        timeout = settings.jade_idle_timeout_seconds
-        if timeout == 0:
-            return
         with self.lock:
-            if self.missions or self.manual_start_phase:
+            timeout = self.idle_timeout_seconds
+            if timeout == 0 or self.missions or self.manual_start_phase:
                 return
             try:
                 state = self.instance_state()
@@ -95,7 +156,7 @@ class Jade:
                 now = monotonic()
                 if self.idle_since is None:
                     self.idle_since = now
-                if state == "running" and now - self.idle_since >= timeout:
+                if state == "running" and now >= self.idle_since + timeout:
                     self.ec2.stop_instances(InstanceIds=[settings.jade_instance_id])
                     self.stop_requested = True
                     self.idle_since = None

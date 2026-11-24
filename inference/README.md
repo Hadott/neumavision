@@ -251,6 +251,24 @@ arranca automáticamente con el sistema operativo. Configurar en Nina:
 | `INFERENCE_TIMEOUT` | Tiempo máximo por solicitud de imagen, en segundos (300 por defecto) |
 | `ANALYSIS_S3_BUCKET` | Bucket privado para originales, JPEG procesados y PDF |
 
+En **Administración**, un administrador puede consultar el estado de Jade,
+encender la instancia EC2 y configurar su apagado automático. El panel muestra
+el tipo exacto de la instancia, región, zona y especificaciones de AWS a través
+de `GET /api/v1/inference/instance`. Si el rol no puede consultar las
+especificaciones en EC2 y la instancia es una `g6.xlarge`, se usa la
+[ficha oficial de AWS](https://docs.aws.amazon.com/ec2/latest/instancetypes/ac.html).
+Para otros tipos, el panel conserva el tipo de instancia, la región y la zona.
+
+`PUT /api/v1/inference/auto-shutdown` recibe `{"enabled": false}` para desactivar
+el apagado o `{"enabled": true, "idle_timeout_seconds": 1800}` para activarlo
+con un plazo determinado. La API admite entre 1 y 86400 segundos y el panel
+admite entre 1 y 1440 minutos. Al habilitarlo sin especificar un plazo, se usa el
+plazo activo, el configurado en `JADE_IDLE_TIMEOUT_SECONDS` o 20 minutos si
+ambos están desactivados. El cambio se aplica al proceso de Nina en ejecución.
+Al reiniciarlo, vuelve a aplicarse `JADE_IDLE_TIMEOUT_SECONDS`. Al activar o
+cambiar el plazo, este se cuenta desde la siguiente comprobación de inactividad
+o desde que termina el último trabajo en curso.
+
 Cuando Jade esté apagada, un administrador puede pulsar **Encender Jade** en
 el indicador de inferencia. `POST /api/v1/inference/start` acepta la solicitud
 y Nina intenta el arranque en segundo plano. Si EC2 devuelve un error de
@@ -260,7 +278,8 @@ cualquier error de la solicitud. Los reintentos siguen al cerrar la pestaña
 y se interrumpen al reiniciar el backend.
 
 El rol de instancia de Nina requiere `ec2:DescribeInstances` sobre `*` y
-`ec2:StartInstances` y `ec2:StopInstances` limitados al ARN de Jade. Para S3
+`ec2:StartInstances` y `ec2:StopInstances` limitados al ARN de Jade.
+La consulta directa de especificaciones requiere `ec2:DescribeInstanceTypes` sobre `*`. Para S3
 requiere `s3:PutObject` y `s3:GetObject` en los prefijos `originals/*`,
 `analysis/*` y `reports/*` del bucket. Ver [ejemplos de políticas de EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ExamplePolicies_EC2.html).
 
