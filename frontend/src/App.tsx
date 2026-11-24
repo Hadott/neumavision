@@ -1,5 +1,15 @@
 import {
   BarChart3,
+  CircuitBoard,
+  Cpu,
+  ExternalLink,
+  HardDrive,
+  MapPin,
+  MemoryStick,
+  Network,
+  Power,
+  Server,
+  Timer,
   Check,
   ChevronDown,
   ChevronsUpDown,
@@ -63,6 +73,10 @@ const colorForLabel: Record<string, string> = {
 };
 
 const fallbackColor = "#4ca8ff";
+const jadeTone = (status?: InferenceHealth["status"]) =>
+  status === "up" ? "on"
+    : status === "starting" || status === "waiting_capacity" || status === "stopping" ? "busy"
+    : status === "unavailable" ? "error" : "off";
 // Las rocas fuera de la pista no van al informe: se ocultan por defecto y solo se muestran como referencia.
 const OFF_ROAD_LABEL = "Rocas fuera de pista";
 const withoutOffRoad = (labels: string[]) => labels.filter((label) => label !== OFF_ROAD_LABEL);
@@ -909,68 +923,83 @@ export default function App() {
             </div>
           </section>
           <section className="workspace" aria-labelledby="inference-settings-title">
-            <div className="card admin-accounts jade-card">
-            <header className="admin-accounts-title">
-              <div>
-                <h2 id="inference-settings-title">Jade · Amazon EC2 de inferencia</h2>
-                <p role="status">{inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}</p>
-              </div>
-              {idleTimeout != null && (inferenceHealth?.status === "down" || inferenceHealth?.status === "unavailable") && (
-                <button type="button" className="button secondary" disabled={startingInference} onClick={startInference}>
-                  {startingInference ? "Solicitando encendido…" : "Encender Jade"}
-                </button>
-              )}
-            </header>
-            {instanceError ? <p role="alert">{instanceError}</p> : inferenceInstance ? (
-              <dl className="jade-specs">
-                <div><dt>Tipo de instancia</dt><dd>{inferenceInstance.instance_type}</dd></div>
-                <div><dt>Región y zona</dt><dd>{inferenceInstance.region} · {inferenceInstance.availability_zone}</dd></div>
-                {inferenceInstance.specifications_available && <>
-                  <div><dt>vCPU</dt><dd>{inferenceInstance.vcpus ?? "Sin datos"}</dd></div>
-                  <div><dt>RAM</dt><dd>{inferenceInstance.memory_mib == null ? "Sin datos" : `${inferenceInstance.memory_mib / 1024} GiB`}</dd></div>
-                  <div><dt>GPU</dt><dd>{inferenceInstance.gpus.map((gpu) => `${gpu.count} × ${gpu.name} (${gpu.memory_mib / 1024} GiB por GPU)`).join(", ") || "Sin GPU"}</dd></div>
-                  <div><dt>Red</dt><dd>{inferenceInstance.network_performance ?? "Sin datos"}</dd></div>
-                  {inferenceInstance.local_storage_gb != null && (
-                    <div><dt>Almacenamiento local</dt><dd>{inferenceInstance.local_storage_gb} GB</dd></div>
-                  )}
-                </>}
-              </dl>
-            ) : <p role="status">Consultando la instancia en AWS…</p>}
-            {inferenceInstance?.specifications_url && (
-              <p><a href={inferenceInstance.specifications_url} target="_blank" rel="noreferrer">Ver especificaciones en la ficha oficial de AWS</a></p>
-            )}
-            {inferenceInstance?.specifications_available === false && <p role="status">AWS no devolvió las especificaciones del tipo de instancia.</p>}
-            <form className="admin-accounts-title" onSubmit={(event) => {
-              event.preventDefault();
-              void changeAutoShutdown(true, idleMinutes ? Number(idleMinutes) * 60 : undefined);
-            }}>
-              <div>
-                <h3>Apagado automático</h3>
-                <p role="status">
-                  {idleTimeout == null ? "Control no disponible."
-                    : idleTimeout > 0 ? `Activado. La instancia se apaga tras ${idleTimeout / 60} min sin trabajos de inferencia.`
-                    : "Desactivado. La instancia puede permanecer encendida aunque no haya trabajos de inferencia."}
-                </p>
-              </div>
-              {idleTimeout != null && (
-                <div className="filter-controls">
-                  <label>Minutos de inactividad
-                    <input type="number" min="1" max="1440" step="1" value={idleMinutes}
-                      placeholder={idleTimeout > 0 ? String(idleTimeout / 60) : "Según configuración"}
-                      required={idleTimeout > 0} disabled={savingAutoShutdown}
-                      onChange={(event) => setIdleMinutes(event.target.value)} />
-                  </label>
-                  <button type="submit" className="button secondary" disabled={savingAutoShutdown}>
-                    {savingAutoShutdown ? "Guardando…" : idleTimeout > 0 ? "Guardar tiempo" : "Activar apagado automático"}
-                  </button>
-                  {idleTimeout > 0 && (
-                    <button type="button" className="button ghost" disabled={savingAutoShutdown}
-                      onClick={() => void changeAutoShutdown(false)}>Desactivar apagado automático</button>
-                  )}
+            <div className="card jade-card">
+              <header className="jade-header">
+                <span className="jade-icon" aria-hidden="true"><Server size={22} /></span>
+                <div>
+                  <h2 id="inference-settings-title">Jade</h2>
+                  <p>Servidor con GPU en AWS que ejecuta los modelos de rocas y pista</p>
                 </div>
+                <span className={`jade-status ${jadeTone(inferenceHealth?.status)}`} role="status">
+                  <i aria-hidden="true" />{inferenceStatusLabel[inferenceHealth?.status ?? "unknown"]}
+                </span>
+                {idleTimeout != null && (inferenceHealth?.status === "down" || inferenceHealth?.status === "unavailable") && (
+                  <button type="button" className="button primary" disabled={startingInference} onClick={startInference}>
+                    {startingInference ? <LoaderCircle className="spin" size={16} /> : <Power size={16} />}
+                    {startingInference ? "Solicitando encendido…" : "Encender Jade"}
+                  </button>
+                )}
+              </header>
+
+              {instanceError ? <p className="jade-message" role="alert">{instanceError}</p> : inferenceInstance ? (
+                <dl className="jade-specs">
+                  <div><dt><Server size={15} aria-hidden="true" />Instancia</dt><dd>{inferenceInstance.instance_type}</dd></div>
+                  {inferenceInstance.specifications_available && <>
+                    <div className="jade-spec-gpu"><dt><CircuitBoard size={15} aria-hidden="true" />GPU</dt><dd>{inferenceInstance.gpus.map((gpu) => `${gpu.count > 1 ? `${gpu.count} × ` : ""}${gpu.name}`).join(", ") || "Sin GPU"}<small>{inferenceInstance.gpus.map((gpu) => `${gpu.memory_mib / 1024} GiB de memoria`).join(", ")}</small></dd></div>
+                    <div><dt><Cpu size={15} aria-hidden="true" />vCPU</dt><dd>{inferenceInstance.vcpus ?? "—"}</dd></div>
+                    <div><dt><MemoryStick size={15} aria-hidden="true" />RAM</dt><dd>{inferenceInstance.memory_mib == null ? "—" : `${inferenceInstance.memory_mib / 1024} GiB`}</dd></div>
+                    {inferenceInstance.local_storage_gb != null && (
+                      <div><dt><HardDrive size={15} aria-hidden="true" />Disco</dt><dd>{inferenceInstance.local_storage_gb} GB</dd></div>
+                    )}
+                    <div><dt><Network size={15} aria-hidden="true" />Red</dt><dd>{inferenceInstance.network_performance ?? "—"}</dd></div>
+                  </>}
+                  <div><dt><MapPin size={15} aria-hidden="true" />Región</dt><dd>{inferenceInstance.region}<small>Zona {inferenceInstance.availability_zone}</small></dd></div>
+                </dl>
+              ) : <p className="jade-message" role="status"><LoaderCircle className="spin" size={15} /> Consultando la instancia en AWS…</p>}
+              {inferenceInstance?.specifications_available === false && <p className="jade-message" role="status">AWS no devolvió las especificaciones del tipo de instancia.</p>}
+              {inferenceInstance?.specifications_url && (
+                <a className="jade-link" href={inferenceInstance.specifications_url} target="_blank" rel="noreferrer">
+                  Ficha técnica en AWS <ExternalLink size={14} aria-hidden="true" />
+                </a>
               )}
-            </form>
-            {autoShutdownError && <p role="alert">{autoShutdownError}</p>}
+
+              <form className="jade-shutdown" onSubmit={(event) => {
+                event.preventDefault();
+                void changeAutoShutdown(true, idleMinutes ? Number(idleMinutes) * 60 : undefined);
+              }}>
+                <span className="jade-shutdown-icon" aria-hidden="true"><Timer size={20} /></span>
+                <div className="jade-shutdown-text">
+                  <h3>
+                    Apagado automático
+                    {idleTimeout != null && <span className={`jade-pill ${idleTimeout > 0 ? "on" : "off"}`}>{idleTimeout > 0 ? "Activado" : "Desactivado"}</span>}
+                  </h3>
+                  <p role="status">
+                    {idleTimeout == null ? "Control no disponible en este servidor."
+                      : idleTimeout > 0 ? `Jade se apaga tras ${idleTimeout / 60} min sin análisis, para no pagar horas de GPU sin uso.`
+                      : "Jade queda encendido aunque no haya análisis. Actívalo para no pagar horas de GPU sin uso."}
+                  </p>
+                </div>
+                {idleTimeout != null && (
+                  <div className="jade-shutdown-controls">
+                    <label className="jade-minutes">
+                      <span className="sr-only">Minutos de inactividad</span>
+                      <input type="number" min="1" max="1440" step="1" inputMode="numeric" value={idleMinutes}
+                        placeholder={idleTimeout > 0 ? String(idleTimeout / 60) : "20"}
+                        required={idleTimeout > 0} disabled={savingAutoShutdown}
+                        onChange={(event) => setIdleMinutes(event.target.value)} />
+                      <span aria-hidden="true">min</span>
+                    </label>
+                    <button type="submit" className="button primary" disabled={savingAutoShutdown}>
+                      {savingAutoShutdown ? "Guardando…" : idleTimeout > 0 ? "Guardar" : "Activar"}
+                    </button>
+                    {idleTimeout > 0 && (
+                      <button type="button" className="button secondary" disabled={savingAutoShutdown}
+                        onClick={() => void changeAutoShutdown(false)}>Desactivar</button>
+                    )}
+                  </div>
+                )}
+              </form>
+              {autoShutdownError && <p className="jade-message error" role="alert">{autoShutdownError}</p>}
             </div>
           </section>
           <AdminAccounts onViewMissions={viewAccountMissions} />

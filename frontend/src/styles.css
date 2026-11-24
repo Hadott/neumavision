@@ -962,3 +962,49 @@ body { background: #ebeeec; }
 .button.danger:hover:not(:disabled) { background: #c8372d; color: #fff; }
 .admin-delete-account { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e3e7e5; }
 .admin-delete-account small { color: var(--muted); font-size: 13px; }
+/* Panel de Jade (Administración) */
+.jade-card { padding: 22px 24px; margin-bottom: 18px; display: grid; gap: 18px; }
+.jade-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
+.jade-header > div { flex: 1 1 260px; }
+.jade-header h2 { margin: 0; font-size: 20px; font-weight: 750; font-stretch: 112%; }
+.jade-header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+.jade-icon, .jade-shutdown-icon { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 12px; background: #1d2730; color: #f2b705; }
+.jade-status { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; font-size: 14px; font-weight: 650; background: #ebeeec; color: #3e4a52; }
+.jade-status i { width: 9px; height: 9px; border-radius: 50%; background: #8c979c; }
+.jade-status.on { background: #e3f2e9; color: #22603c; } .jade-status.on i { background: #2e7d4f; box-shadow: 0 0 0 3px rgba(46,125,79,.18); }
+.jade-status.busy { background: #fff4d6; color: #7a5600; } .jade-status.busy i { background: #e0a100; }
+.jade-status.error { background: #fbeae8; color: #9e2820; } .jade-status.error i { background: #c8372d; }
+.jade-specs { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.jade-specs > div { padding: 12px 14px; border-radius: 12px; background: #f4f6f5; border: 1px solid #e3e7e5; }
+.jade-specs dt { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.jade-specs dd { margin: 6px 0 0; font-size: 18px; font-weight: 700; color: var(--ink); }
+.jade-specs dd small { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.jade-specs .jade-spec-gpu { grid-column: span 2; background: #1d2730; border-color: #1d2730; }
+.jade-specs .jade-spec-gpu dt, .jade-specs .jade-spec-gpu dd small { color: #a9b3b0; }
+.jade-specs .jade-spec-gpu dd { color: #fff; }
+.jade-specs .jade-spec-gpu dt svg { color: #f2b705; }
+.jade-link { justify-self: start; display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #c5ccca; }
+.jade-link:hover { text-decoration-color: currentColor; }
+.jade-message { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.jade-message.error { color: #9e2820; }
+.jade-shutdown { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 16px; border-radius: 12px; border: 1px solid #e3e7e5; }
+.jade-shutdown-icon { width: 40px; height: 40px; border-radius: 10px; background: #f4f6f5; color: var(--ink); }
+.jade-shutdown-text { flex: 1 1 280px; }
+.jade-shutdown-text h3 { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 16px; }
+.jade-shutdown-text p { margin: 4px 0 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.jade-pill { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.jade-pill.on { background: #e3f2e9; color: #22603c; } .jade-pill.off { background: #ebeeec; color: #3e4a52; }
+.jade-shutdown-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.jade-minutes { display: flex; align-items: center; border: 1px solid #c5ccca; border-radius: 10px; background: #fff; padding-right: 12px; }
+.jade-minutes:focus-within { border-color: #f2b705; box-shadow: 0 0 0 3px rgba(242,183,5,.25); }
+.jade-minutes input { width: 64px; min-height: 42px; border: 0; background: transparent; padding: 0 4px 0 12px; font: inherit; font-size: 15px; font-weight: 650; text-align: right; outline: none; -moz-appearance: textfield; }
+.jade-minutes input::-webkit-outer-spin-button, .jade-minutes input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.jade-minutes span { color: var(--muted); font-size: 14px; }
+.jade-shutdown-controls .button { min-height: 44px; }
+@media (max-width: 700px) { .jade-specs .jade-spec-gpu { grid-column: auto; } }
+.jade-specs { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); }
+.jade-specs dd { font-size: 16px; white-space: nowrap; }
+.jade-specs > div { padding: 11px 12px; }
+.jade-specs { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.jade-specs .jade-spec-gpu { grid-column: auto; }
+.jade-specs dd { white-space: normal; overflow-wrap: anywhere; }
