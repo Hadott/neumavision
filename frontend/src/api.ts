@@ -119,6 +119,14 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nombre, correo })
     }),
+  deleteFaena: async (id: string) => {
+    const response = await fetch(`${API_URL}/auth/admin/faenas/${id}`, { method: "DELETE", headers: authHeaders() });
+    if (response.status === 401) onUnauthorized?.();
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(typeof body?.detail === "string" ? body.detail : `Error ${response.status}`);
+    }
+  },
   resetFaenaPassword: (id: string, contrasena: string) =>
     request<void>(`/auth/faenas/${id}/password`, {
       method: "PUT",

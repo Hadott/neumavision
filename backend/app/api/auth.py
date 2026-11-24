@@ -189,3 +189,25 @@ def reset_faena_password(
     faena.hash_contrasena = hash_password(payload.contrasena)
     session.add(faena)
     session.commit()
+
+
+@router.delete("/admin/faenas/{faena_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_faena(faena_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)) -> None:
+    """Elimina una cuenta sin misiones. Las misiones se eliminan antes, una por una,
+    para que borrar una cuenta nunca borre inspecciones por accidente."""
+    if not is_admin(cuenta):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
+    if faena_id == cuenta.id_faena:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No puedes eliminar tu propia cuenta.")
+
+    faena = session.get(Faena, faena_id)
+    if faena is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faena no encontrada.")
+    if session.exec(select(Mision.id_mision).where(Mision.id_faena == faena_id)).first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La cuenta tiene misiones. Elimínalas antes de eliminar la cuenta.",
+        )
+
+    session.delete(faena)
+    session.commit()

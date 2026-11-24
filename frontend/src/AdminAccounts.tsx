@@ -1,24 +1,31 @@
-import { Eye, EyeOff, LoaderCircle } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, Trash2 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
-import { api } from "./api";
+import { api, getSession } from "./api";
 import type { Account } from "./types";
 
 function AccountCard({
   account,
   onUpdated,
+  onDeleted,
   onViewMissions
 }: {
   account: Account;
   onUpdated: (account: Account) => void;
+  onDeleted: (account: Account) => void;
   onViewMissions: (account: Account) => void;
 }) {
+  const isOwnAccount = getSession()?.cuenta.id === account.id;
+  const missionCount = account.misiones ?? 0;
+  const deleteBlockedReason = isOwnAccount ? "No puedes eliminar tu propia cuenta."
+    : missionCount > 0 ? `Tiene ${missionCount} ${missionCount === 1 ? "misión" : "misiones"}: elimínalas antes de eliminar la cuenta.`
+    : "";
   const [nombre, setNombre] = useState(account.nombre);
   const [correo, setCorreo] = useState(account.correo);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState<"profile" | "password" | null>(null);
+  const [busy, setBusy] = useState<"profile" | "password" | "delete" | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -54,6 +61,21 @@ function AccountCard({
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "No se pudo restablecer la contraseña.");
     } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteAccount() {
+    const confirmed = window.confirm(`¿Eliminar la cuenta "${account.nombre}" (${account.correo})? Ya no podrá iniciar sesión y esta acción no se puede deshacer.`);
+    if (!confirmed) return;
+    setBusy("delete");
+    setError("");
+    setSuccess("");
+    try {
+      await api.deleteFaena(account.id);
+      onDeleted(account);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No se pudo eliminar la cuenta.");
       setBusy(null);
     }
   }
@@ -124,6 +146,13 @@ function AccountCard({
           Asignar contraseña nueva
         </button>
       </form>
+      <div className="admin-delete-account">
+        <button className="button danger" type="button" disabled={busy !== null || Boolean(deleteBlockedReason)} onClick={deleteAccount}>
+          {busy === "delete" ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
+          Eliminar cuenta
+        </button>
+        {deleteBlockedReason && <small>{deleteBlockedReason}</small>}
+      </div>
       {error && <div className="admin-account-message error">{error}</div>}
       {success && <div className="admin-account-message success">{success}</div>}
     </article>
@@ -144,6 +173,10 @@ export default function AdminAccounts({ onViewMissions }: { onViewMissions: (acc
 
   function updateAccount(updated: Account) {
     setAccounts((current) => current.map((account) => account.id === updated.id ? { ...account, ...updated } : account));
+  }
+
+  function removeAccount(deleted: Account) {
+    setAccounts((current) => current.filter((account) => account.id !== deleted.id));
   }
 
   function addAccount(created: Account) {
@@ -168,7 +201,7 @@ export default function AdminAccounts({ onViewMissions }: { onViewMissions: (acc
           {accounts.length ? (
             <div className="admin-accounts-grid">
               {accounts.map((account) => (
-                <AccountCard key={account.id} account={account} onUpdated={updateAccount} onViewMissions={onViewMissions} />
+                <AccountCard key={account.id} account={account} onUpdated={updateAccount} onDeleted={removeAccount} onViewMissions={onViewMissions} />
               ))}
             </div>
           ) : !error ? (

@@ -16,6 +16,8 @@ class FakeSession:
         self.added: Faena | None = None
         self.committed = False
         self.refreshed: Faena | None = None
+        self.deleted: Faena | None = None
+        self.first_result: object = None
 
     def get(self, model: type[Faena], faena_id: str) -> Faena | None:
         assert model is Faena
@@ -28,7 +30,10 @@ class FakeSession:
         self.committed = True
 
     def exec(self, statement: object) -> "FakeResult":
-        return FakeResult()
+        return FakeResult(self.first_result)
+
+    def delete(self, faena: Faena) -> None:
+        self.deleted = faena
 
     def refresh(self, faena: Faena) -> None:
         self.refreshed = faena
@@ -38,8 +43,11 @@ class FakeSession:
 
 
 class FakeResult:
-    def first(self) -> None:
-        return None
+    def __init__(self, value: object = None) -> None:
+        self.value = value
+
+    def first(self) -> object:
+        return self.value
 
 
 @pytest.fixture
@@ -228,3 +236,55 @@ def test_account_update_rejects_invalid_email(client_for_role: tuple[TestClient,
 
     assert response.status_code == 422
     assert not session.committed
+
+
+def test_admin_can_delete_account_without_missions(client_for_role: tuple[TestClient, FakeSession]) -> None:
+    client, session = client_for_role
+
+    response = client.delete("/api/v1/auth/admin/faenas/target-faena")
+
+    assert response.status_code == 204
+    assert session.deleted is session.target
+    assert session.committed
+
+
+def test_delete_account_with_missions_is_rejected(client_for_role: tuple[TestClient, FakeSession]) -> None:
+    client, session = client_for_role
+    session.first_result = "mision-1"
+
+    response = client.delete("/api/v1/auth/admin/faenas/target-faena")
+
+    assert response.status_code == 409
+    assert "misiones" in response.json()["detail"]
+    assert session.deleted is None
+    assert not session.committed
+
+
+def test_admin_cannot_delete_own_account(client_for_role: tuple[TestClient, FakeSession]) -> None:
+    client, session = client_for_role
+
+    response = client.delete("/api/v1/auth/admin/faenas/actor")
+
+    assert response.status_code == 409
+    assert session.deleted is None
+
+
+def test_delete_account_rejects_non_admin(client_for_role: tuple[TestClient, FakeSession]) -> None:
+    client, session = client_for_role
+    app.dependency_overrides[get_current_faena] = lambda: Faena(
+        id_faena="otra", nombre="Otra", correo="otra@example.test", hash_contrasena="x", rol="faena"
+    )
+
+    response = client.delete("/api/v1/auth/admin/faenas/target-faena")
+
+    assert response.status_code == 403
+    assert session.deleted is None
+
+
+def test_delete_account_returns_not_found(client_for_role: tuple[TestClient, FakeSession]) -> None:
+    client, session = client_for_role
+
+    response = client.delete("/api/v1/auth/admin/faenas/no-existe")
+
+    assert response.status_code == 404
+    assert session.deleted is None

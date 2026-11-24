@@ -957,3 +957,8 @@ body { background: #ebeeec; }
 .stats-periods button { min-height: 36px; border-radius: 8px; background: none; color: var(--muted); font-size: 14px; font-weight: 600; padding: 0 14px; }
 .stats-periods button.active { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(29,39,48,.15); }
 @media (max-width: 900px) { .stats-periods { margin-left: 0; } .field-picker { min-width: 160px; } }
+/* Eliminar cuenta */
+.button.danger { background: #fff; border: 1px solid #c8372d; color: #9e2820; }
+.button.danger:hover:not(:disabled) { background: #c8372d; color: #fff; }
+.admin-delete-account { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e3e7e5; }
+.admin-delete-account small { color: var(--muted); font-size: 13px; }
