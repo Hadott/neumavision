@@ -238,3 +238,68 @@ def test_manual_start_reports_exhausted_capacity(manager, monkeypatch):
     assert manager.ec2.start_instances.call_count == 2
     assert manager.status() == "down"
     assert "sin capacidad" in manager.manual_start_error
+
+
+def test_admin_can_stop_jade(manager, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.models import Faena
+    from app.services.auth import get_current_faena
+
+    monkeypatch.setattr(main, "jade", manager)
+    actor = Faena(rol="faena")
+    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: actor)
+    client = TestClient(main.app)
+    url = f"{settings.api_prefix}/inference/stop"
+    manager.ec2.describe_instances.return_value = instance("running")
+
+    assert client.post(url).status_code == 403
+    manager.ec2.stop_instances.assert_not_called()
+
+    actor.rol = "admin"
+    response = client.post(url)
+    assert response.status_code == 202
+    assert response.json() == {"status": "stopping"}
+    manager.ec2.stop_instances.assert_called_once_with(InstanceIds=[settings.jade_instance_id])
+    assert manager.stop_requested
+
+    manager.ec2.describe_instances.return_value = instance("stopped")
+    assert client.post(url).json() == {"status": "already_stopped"}
+    manager.ec2.stop_instances.assert_called_once()
+
+
+def test_stop_is_refused_while_a_mission_runs(manager, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.models import Faena
+    from app.services.auth import get_current_faena
+
+    monkeypatch.setattr(main, "jade", manager)
+    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: Faena(rol="admin"))
+    manager.ec2.describe_instances.return_value = instance("running")
+    manager.missions.add("mision-en-curso")
+
+    response = TestClient(main.app).post(f"{settings.api_prefix}/inference/stop")
+
+    assert response.status_code == 409
+    assert "misiones" in response.json()["detail"]
+    manager.ec2.stop_instances.assert_not_called()
+
+
+def test_stop_reports_aws_errors(manager, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.models import Faena
+    from app.services.auth import get_current_faena
+
+    monkeypatch.setattr(main, "jade", manager)
+    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: Faena(rol="admin"))
+    manager.ec2.describe_instances.return_value = instance("running")
+    manager.ec2.stop_instances.side_effect = ClientError({"Error": {"Code": "UnauthorizedOperation"}}, "StopInstances")
+
+    response = TestClient(main.app).post(f"{settings.api_prefix}/inference/stop")
+
+    assert response.status_code == 503

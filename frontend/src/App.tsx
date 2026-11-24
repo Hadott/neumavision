@@ -8,6 +8,7 @@ import {
   MemoryStick,
   Network,
   Power,
+  PowerOff,
   Server,
   Timer,
   Check,
@@ -237,6 +238,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [inferenceHealth, setInferenceHealth] = useState<InferenceHealth | null>(null);
   const [startingInference, setStartingInference] = useState(false);
+  const [stoppingInference, setStoppingInference] = useState(false);
   const [inferenceStartError, setInferenceStartError] = useState("");
   const [savingAutoShutdown, setSavingAutoShutdown] = useState(false);
   const [autoShutdownError, setAutoShutdownError] = useState("");
@@ -585,6 +587,21 @@ export default function App() {
       setInferenceStartError(requestError instanceof Error ? requestError.message : "No se pudo solicitar el encendido.");
     } finally {
       setStartingInference(false);
+    }
+  }
+
+  async function stopInference() {
+    const confirmed = window.confirm("¿Apagar Jade ahora? Los análisis nuevos tendrán que volver a encenderlo, lo que tarda unos minutos.");
+    if (!confirmed) return;
+    setStoppingInference(true);
+    setInferenceStartError("");
+    try {
+      await api.stopInference();
+      setInferenceHealth(await api.inferenceHealth());
+    } catch (requestError) {
+      setInferenceStartError(requestError instanceof Error ? requestError.message : "No se pudo apagar Jade.");
+    } finally {
+      setStoppingInference(false);
     }
   }
 
@@ -939,7 +956,14 @@ export default function App() {
                     {startingInference ? "Solicitando encendido…" : "Encender Jade"}
                   </button>
                 )}
+                {idleTimeout != null && inferenceHealth?.status === "up" && (
+                  <button type="button" className="button danger" disabled={stoppingInference} onClick={stopInference}>
+                    {stoppingInference ? <LoaderCircle className="spin" size={16} /> : <PowerOff size={16} />}
+                    {stoppingInference ? "Apagando…" : "Apagar Jade"}
+                  </button>
+                )}
               </header>
+              {inferenceStartError && <p className="jade-message error" role="alert">{inferenceStartError}</p>}
 
               {instanceError ? <p className="jade-message" role="alert">{instanceError}</p> : inferenceInstance ? (
                 <dl className="jade-specs">

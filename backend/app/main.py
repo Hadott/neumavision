@@ -1,6 +1,8 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,7 +13,9 @@ from app.config import settings
 from app.database import ensure_development_faena, initialize_database
 from app.schemas import HealthRead, InferenceAutoShutdownUpdate, InferenceHealthRead, InferenceInstanceRead
 from app.services.auth import CurrentFaena, is_admin
-from app.services.jade import IDLE_CHECK_SECONDS, JadeUnavailable, jade
+from app.services.jade import IDLE_CHECK_SECONDS, JadeBusy, JadeUnavailable, jade
+
+logger = logging.getLogger(__name__)
 
 
 async def monitor_jade(stop: asyncio.Event) -> None:
@@ -79,6 +83,22 @@ def start_inference(cuenta: CurrentFaena) -> dict[str, str]:
         raise HTTPException(409, "El encendido de Jade no está configurado.")
     jade.request_start()
     return {"status": "accepted"}
+
+
+@app.post(f"{settings.api_prefix}/inference/stop", status_code=202, tags=["system"])
+def stop_inference(cuenta: CurrentFaena) -> dict[str, str]:
+    if not is_admin(cuenta):
+        raise HTTPException(403, "Solo un administrador puede apagar Jade.")
+    if settings.detector_mode != "remote" or not settings.jade_instance_id:
+        raise HTTPException(409, "El apagado de Jade no está configurado.")
+    try:
+        stopping = jade.request_stop()
+    except JadeBusy as error:
+        raise HTTPException(409, str(error)) from error
+    except (BotoCoreError, ClientError) as error:
+        logger.exception("No se pudo apagar Jade")
+        raise HTTPException(503, "AWS no permitió apagar Jade. Intenta de nuevo en un momento.") from error
+    return {"status": "stopping" if stopping else "already_stopped"}
 
 
 @app.put(f"{settings.api_prefix}/inference/auto-shutdown", tags=["system"])

@@ -74,6 +74,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>("/health"),
   startInference: () => request<{ status: "accepted" }>("/inference/start", { method: "POST" }),
+  stopInference: () => request<{ status: "stopping" | "already_stopped" }>("/inference/stop", { method: "POST" }),
   inferenceHealth: () => request<InferenceHealth>("/inference/health"),
   inferenceInstance: () => request<InferenceInstance>("/inference/instance"),
   setInferenceAutoShutdown: (enabled: boolean, idleTimeoutSeconds?: number) =>

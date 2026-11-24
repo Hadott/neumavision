@@ -30,6 +30,10 @@ class MissionAlreadyRunning(RuntimeError):
     pass
 
 
+class JadeBusy(RuntimeError):
+    """Jade no se puede apagar porque está analizando o encendiéndose."""
+
+
 class Jade:
     def __init__(self):
         self.lock = Lock()
@@ -162,6 +166,21 @@ class Jade:
                     self.idle_since = None
             except (BotoCoreError, ClientError, IndexError, KeyError):
                 logger.exception("No se pudo comprobar o detener Jade por inactividad")
+
+    def request_stop(self) -> bool:
+        """Apaga Jade a pedido de un administrador. Devuelve False si ya estaba apagado."""
+        with self.lock:
+            if self.missions:
+                raise JadeBusy("Hay misiones analizándose. Espera a que terminen para apagar Jade.")
+            if self.manual_start_phase:
+                raise JadeBusy("Jade se está encendiendo. Espera a que termine para apagarlo.")
+            if self.instance_state() not in {"pending", "running"}:
+                return False
+            self.ec2.stop_instances(InstanceIds=[settings.jade_instance_id])
+            self.stop_requested = True
+            self.ready = False
+            self.idle_since = None
+            return True
 
     def request_start(self) -> None:
         with self.lock:
