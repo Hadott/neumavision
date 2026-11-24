@@ -922,3 +922,17 @@ body { background: #ebeeec; }
 .login-brand-panel::before, .login-brand-panel::after { display: none; }
 .jade-card { padding: 20px 22px; margin-bottom: 18px; }
 .jade-card h2 { font-size: 18px; }
+/* Selector de faena del menú lateral */
+.sidebar-field > span:first-child { font-size: 12px; color: #a9b3b0; }
+.faena-picker { position: relative; display: flex; align-items: center; border-radius: 10px; background: #26323c; border: 1px solid #3a4853; transition: border-color .15s, background .15s; }
+.faena-picker:hover { background: #2c3944; border-color: #51606b; }
+.faena-picker:focus-within { border-color: #f2b705; box-shadow: 0 0 0 3px rgba(242,183,5,.25); }
+.faena-picker.selected { border-color: #f2b705; }
+.faena-picker > svg { position: absolute; pointer-events: none; color: #a9b3b0; }
+.faena-picker > svg:first-child { left: 11px; }
+.faena-picker.selected > svg:first-child { color: #f2b705; }
+.faena-picker > svg:last-child { right: 10px; }
+.faena-picker select { appearance: none; -webkit-appearance: none; width: 100%; min-height: 44px; padding: 0 32px 0 36px; border: 0; border-radius: 10px; background: transparent; color: #fff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; text-overflow: ellipsis; }
+.faena-picker select:focus-visible { outline: none; }
+.faena-picker select option { color: #1d2730; background: #fff; font-weight: 400; }
+@media (max-width: 900px) { .faena-picker { min-width: 200px; } }

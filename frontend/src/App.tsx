@@ -2,8 +2,10 @@ import {
   BarChart3,
   Check,
   ChevronDown,
+  ChevronsUpDown,
   LoaderCircle,
   LogOut,
+  Mountain,
   Plus,
   Route,
   Trash2,
@@ -841,11 +843,16 @@ export default function App() {
           <span><strong>NeumaVision</strong><small>NeumaDiesel</small></span>
         </button>
         {isAdmin && (
-          <label className="sidebar-field">Faena
-            <select className="faena-select" value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)}>
-              <option value="">Todas las faenas</option>
-              {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
-            </select>
+          <label className="sidebar-field">
+            <span>Faena</span>
+            <span className={`faena-picker${faenaFiltro ? " selected" : ""}`}>
+              <Mountain size={17} aria-hidden="true" />
+              <select value={faenaFiltro} onChange={(event) => changeFaenaFiltro(event.target.value)}>
+                <option value="">Todas las faenas</option>
+                {faenas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}
+              </select>
+              <ChevronsUpDown size={15} aria-hidden="true" />
+            </span>
           </label>
         )}
         <div className="sidebar-links">
