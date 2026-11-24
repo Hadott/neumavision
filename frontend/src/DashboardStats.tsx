@@ -1,3 +1,4 @@
+import { ArrowLeftRight, CalendarDays, ChevronsUpDown, History, Route, Tag } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
@@ -207,28 +208,42 @@ export default function DashboardStats({ findings }: { findings: DashboardFindin
       <div className="card stats-filters">
         <label className="stats-field">
           <span>{period === 1 ? "Día seleccionado" : "Período hasta"}</span>
-          <input type="date" value={selected} max={latest} onChange={(event) => changeSelected(event.target.value)} />
+          <span className="field-picker">
+            <CalendarDays size={16} aria-hidden="true" />
+            <input type="date" value={selected} max={latest} onChange={(event) => changeSelected(event.target.value)} />
+          </span>
         </label>
-        <span className="stats-vs">vs</span>
+        <span className="stats-vs" aria-hidden="true"><ArrowLeftRight size={16} /></span>
         <label className="stats-field">
           <span>Comparar con</span>
-          <input type="date" value={compare} max={selected} onChange={(event) => event.target.value && setCompare(event.target.value)} />
+          <span className="field-picker">
+            <History size={16} aria-hidden="true" />
+            <input type="date" value={compare} max={selected} onChange={(event) => event.target.value && setCompare(event.target.value)} />
+          </span>
         </label>
         <label className="stats-field">
           <span>Tramo</span>
-          <select value={segment} onChange={(event) => setSegment(event.target.value)}>
-            <option value="">Todos los tramos</option>
-            {segments.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
+          <span className={`field-picker select${segment ? " selected" : ""}`}>
+            <Route size={16} aria-hidden="true" />
+            <select value={segment} onChange={(event) => setSegment(event.target.value)}>
+              <option value="">Todos los tramos</option>
+              {segments.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <ChevronsUpDown size={15} aria-hidden="true" />
+          </span>
         </label>
         <label className="stats-field">
           <span>Tipo de hallazgo</span>
-          <select value={label} onChange={(event) => setLabel(event.target.value)}>
-            <option value="">Todos</option>
-            {labels.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
+          <span className={`field-picker select${label ? " selected" : ""}`}>
+            <Tag size={16} aria-hidden="true" />
+            <select value={label} onChange={(event) => setLabel(event.target.value)}>
+              <option value="">Todos</option>
+              {labels.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <ChevronsUpDown size={15} aria-hidden="true" />
+          </span>
         </label>
-        <div className="stats-periods">
+        <div className="stats-periods" role="group" aria-label="Período">
           {PERIODS.map((item) => (
             <button key={item.value} className={period === item.value ? "active" : ""} onClick={() => changePeriod(item.value)}>{item.label}</button>
           ))}

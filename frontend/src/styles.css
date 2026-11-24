@@ -936,3 +936,24 @@ body { background: #ebeeec; }
 .faena-picker select:focus-visible { outline: none; }
 .faena-picker select option { color: #1d2730; background: #fff; font-weight: 400; }
 @media (max-width: 900px) { .faena-picker { min-width: 200px; } }
+/* Filtros de Estadísticas */
+.stats-filters { padding: 16px 18px; gap: 14px; align-items: flex-end; }
+.stats-field { gap: 6px; }
+.stats-field > span:first-child { color: var(--muted); font-size: 13px; font-weight: 600; }
+.field-picker { position: relative; display: flex; align-items: center; min-width: 190px; border: 1px solid #c5ccca; border-radius: 10px; background: #fff; transition: border-color .15s, background .15s; }
+.field-picker:hover { border-color: #8f9a97; }
+.field-picker:focus-within { border-color: #f2b705; box-shadow: 0 0 0 3px rgba(242,183,5,.25); }
+.field-picker.selected { border-color: #f2b705; background: #fff8e0; }
+.field-picker > svg { position: absolute; pointer-events: none; color: var(--muted); }
+.field-picker > svg:first-child { left: 11px; }
+.field-picker.selected > svg:first-child { color: #7a5600; }
+.field-picker > svg:last-child:not(:first-child) { right: 10px; }
+.stats-field .field-picker input, .stats-field .field-picker select { appearance: none; -webkit-appearance: none; width: 100%; min-width: 0; min-height: 42px; padding: 0 12px 0 36px; border: 0; border-radius: 10px; background: transparent; box-shadow: none; color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.stats-field .field-picker.select select { padding-right: 32px; }
+.stats-field .field-picker input:focus, .stats-field .field-picker select:focus { box-shadow: none; outline: none; }
+.field-picker input::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+.stats-vs { padding-bottom: 12px; color: var(--muted); }
+.stats-periods { background: #ebeeec; border-radius: 10px; padding: 3px; gap: 2px; align-self: flex-end; }
+.stats-periods button { min-height: 36px; border-radius: 8px; background: none; color: var(--muted); font-size: 14px; font-weight: 600; padding: 0 14px; }
+.stats-periods button.active { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(29,39,48,.15); }
+@media (max-width: 900px) { .stats-periods { margin-left: 0; } .field-picker { min-width: 160px; } }
