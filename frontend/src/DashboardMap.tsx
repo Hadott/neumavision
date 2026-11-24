@@ -1,4 +1,4 @@
-import { CircleMarker, LayersControl, MapContainer, Popup, TileLayer } from "react-leaflet";
+import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
 
 import type { DashboardFinding } from "./types";
 
@@ -49,22 +49,14 @@ export default function DashboardMap({ findings, selectedId, onSelect }: Dashboa
   ];
 
   return (
-    <MapContainer center={center} zoom={16} scrollWheelZoom className="dashboard-map">
-      <LayersControl position="topright">
-        <LayersControl.BaseLayer checked name="Calles">
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-        </LayersControl.BaseLayer>
-        <LayersControl.BaseLayer name="Satélite">
-          <TileLayer
-            attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
-            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-            maxNativeZoom={19}
-          />
-        </LayersControl.BaseLayer>
-      </LayersControl>
+    <MapContainer center={center} zoom={16} maxZoom={21} scrollWheelZoom className="dashboard-map">
+      {/* Solo vista satelital: en una faena el estado del camino se reconoce mejor en la imagen aérea. */}
+      <TileLayer
+        attribution='Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        maxNativeZoom={19}
+        maxZoom={21}
+      />
       {located.map((item) => {
         const criticality = criticalityOf(item.confidence, item.label);
         const color = criticalityColor[criticality];
