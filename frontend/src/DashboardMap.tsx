@@ -16,9 +16,7 @@ export const criticalityLabel: Record<Criticality, string> = {
   optimo: "Óptimo"
 };
 
-// Las detecciones de "Carpeta Buen Estado" no son una anomalía: siempre se clasifican como "óptimo",
-// sin importar la confianza del modelo.
-export const GOOD_CONDITION_LABEL = "Carpeta Buen Estado";
+const GOOD_CONDITION_LABEL = "Carpeta Buen Estado";
 
 export function criticalityOf(confidence: number, label?: string): Criticality {
   if (label === GOOD_CONDITION_LABEL) return "optimo";

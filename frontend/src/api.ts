@@ -1,10 +1,9 @@
-import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, Session } from "./types";
+import type { Account, DashboardFinding, Detection, DetectionProgress, Faena, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, Session } from "./types";
 
 // Por defecto la API se llama en la misma dirección del sitio; Vite la redirige al backend.
-export const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
+const API_URL = import.meta.env.VITE_API_URL || "/api/v1";
 const LOGIN_TIMEOUT_MS = 15_000;
 
-// ---- Sesión ----
 const SESSION_KEY = "neumavision.session";
 let currentSession: Session | null = loadSession();
 let onUnauthorized: (() => void) | null = null;
@@ -54,7 +53,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error("No se pudo conectar con el servidor. Cierra y vuelve a ejecutar npm run dev.");
   }
-  if (response.status === 404 && path.startsWith("/auth/")) {
+  if (response.status === 404 && path === "/auth/login") {
     throw new Error("El servidor no tiene el inicio de sesión. Reinicia el backend para cargar los cambios.");
   }
   if (response.status === 401 && currentSession) {
@@ -106,30 +105,30 @@ export const api = {
 
   me: () => request<Account>("/auth/me"),
 
-  faenas: () => request<Account[]>("/auth/faenas"),
-  adminFaenas: () => request<Account[]>("/auth/admin/faenas"),
-  createFaena: (nombre: string, correo: string, contrasena: string) =>
-    request<Account>("/auth/admin/faenas", {
+  faenas: () => request<Faena[]>("/auth/faenas"),
+  createFaena: (nombre: string) =>
+    request<Faena>("/auth/admin/faenas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nombre, correo, contrasena })
+      body: JSON.stringify({ nombre })
     }),
-  updateFaena: (id: string, nombre: string, correo: string) =>
-    request<Account>(`/auth/admin/faenas/${id}`, {
+  updateFaena: (id: string, nombre: string) =>
+    request<Faena>(`/auth/admin/faenas/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nombre, correo })
+      body: JSON.stringify({ nombre })
     }),
-  deleteFaena: async (id: string) => {
-    const response = await fetch(`${API_URL}/auth/admin/faenas/${id}`, { method: "DELETE", headers: authHeaders() });
-    if (response.status === 401) onUnauthorized?.();
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw new Error(typeof body?.detail === "string" ? body.detail : `Error ${response.status}`);
-    }
-  },
-  resetFaenaPassword: (id: string, contrasena: string) =>
-    request<void>(`/auth/faenas/${id}/password`, {
+  deleteFaena: (id: string) =>
+    request<void>(`/auth/admin/faenas/${id}`, { method: "DELETE" }),
+  users: () => request<Account[]>("/auth/admin/usuarios"),
+  createUser: (nombre: string, correo: string, contrasena: string, rol: Account["rol"], id_faena: string | null) =>
+    request<Account>("/auth/admin/usuarios", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre, correo, contrasena, rol, id_faena })
+    }),
+  resetUserPassword: (id: string, contrasena: string) =>
+    request<void>(`/auth/admin/usuarios/${id}/password`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contrasena })
@@ -181,12 +180,6 @@ export const api = {
   detectionProgress: (missionId: string) => request<DetectionProgress | null>(
     `/missions/${missionId}/detect/progress`, { cache: "no-store" }
   ),
-  editMission: (missionId: string, name: string, segment: string) =>
-    request<Mission>(`/missions/${missionId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, segment })
-    }),
   reviewDetection: (missionId: string, detectionId: string, reviewStatus: ReviewStatus) =>
     request<Detection>(`/missions/${missionId}/detections/${detectionId}`, {
       method: "PATCH",

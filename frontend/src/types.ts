@@ -128,9 +128,11 @@ export type Account = {
   id: string;
   nombre: string;
   correo: string;
-  rol: "admin" | "faena";
-  misiones?: number;
+  rol: "admin" | "operador";
+  id_faena: string | null;
 };
+
+export type Faena = { id: string; nombre: string; misiones: number };
 
 export type Session = {
   token: string;

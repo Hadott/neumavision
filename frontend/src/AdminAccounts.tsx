@@ -1,276 +1,217 @@
-import { Eye, EyeOff, LoaderCircle, Trash2 } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { type Dispatch, type SetStateAction, FormEvent, useEffect, useState } from "react";
 
-import { api, getSession } from "./api";
-import type { Account } from "./types";
+import { api } from "./api";
+import type { Account, Faena } from "./types";
 
-function AccountCard({
-  account,
-  onUpdated,
-  onDeleted,
-  onViewMissions
-}: {
-  account: Account;
-  onUpdated: (account: Account) => void;
-  onDeleted: (account: Account) => void;
-  onViewMissions: (account: Account) => void;
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "No fue posible completar la solicitud.";
+}
+
+function FaenaForm({ faena, onSaved, onDeleted, onViewMissions }: {
+  faena?: Faena;
+  onSaved: (faena: Faena) => void;
+  onDeleted?: () => void;
+  onViewMissions?: () => void;
 }) {
-  const isOwnAccount = getSession()?.cuenta.id === account.id;
-  const missionCount = account.misiones ?? 0;
-  const deleteBlockedReason = isOwnAccount ? "No puedes eliminar tu propia cuenta."
-    : missionCount > 0 ? `Tiene ${missionCount} ${missionCount === 1 ? "misión" : "misiones"}: elimínalas antes de eliminar la cuenta.`
-    : "";
-  const [nombre, setNombre] = useState(account.nombre);
-  const [correo, setCorreo] = useState(account.correo);
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [busy, setBusy] = useState<"profile" | "password" | "delete" | null>(null);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  async function saveProfile(event: FormEvent) {
-    event.preventDefault();
-    setBusy("profile");
-    setError("");
-    setSuccess("");
-    try {
-      onUpdated(await api.updateFaena(account.id, nombre, correo));
-      setSuccess("Datos de la cuenta actualizados.");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo actualizar la cuenta.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function resetPassword(event: FormEvent) {
-    event.preventDefault();
-    if (password !== confirmPassword) {
-      setError("Las contraseñas no coinciden.");
-      return;
-    }
-    setBusy("password");
-    setError("");
-    setSuccess("");
-    try {
-      await api.resetFaenaPassword(account.id, password);
-      setPassword("");
-      setConfirmPassword("");
-      setSuccess("Contraseña restablecida. Comunícala al usuario por un canal privado.");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo restablecer la contraseña.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function deleteAccount() {
-    const confirmed = window.confirm(`¿Eliminar la cuenta "${account.nombre}" (${account.correo})? Ya no podrá iniciar sesión y esta acción no se puede deshacer.`);
-    if (!confirmed) return;
-    setBusy("delete");
-    setError("");
-    setSuccess("");
-    try {
-      await api.deleteFaena(account.id);
-      onDeleted(account);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo eliminar la cuenta.");
-      setBusy(null);
-    }
-  }
-
-  return (
-    <article className="card admin-account-card">
-      <header className="admin-account-header">
-        <div>
-          <strong>{account.nombre}</strong>
-          <span className="admin-account-role">{account.rol === "admin" ? "Administrador" : "Faena"}</span>
-        </div>
-      </header>
-
-      <form className="admin-account-form" onSubmit={saveProfile}>
-        <label>
-          <span>Nombre</span>
-          <input required maxLength={120} value={nombre} onChange={(event) => setNombre(event.target.value)} />
-        </label>
-        <label>
-          <span>Correo electrónico</span>
-          <input required type="email" maxLength={255} value={correo} onChange={(event) => setCorreo(event.target.value)} />
-        </label>
-        <div className="admin-account-actions">
-          <button className="button primary" type="submit" disabled={busy !== null}>
-            {busy === "profile" ? <LoaderCircle className="spin" size={14} /> : null}
-            Guardar datos
-          </button>
-          <button className="button ghost" type="button" onClick={() => onViewMissions(account)}>
-            Ver {account.misiones ?? 0} misiones
-          </button>
-        </div>
-      </form>
-
-      <form className="admin-password-form" onSubmit={resetPassword}>
-        <strong>Restablecer contraseña</strong>
-        <p>Mínimo 8 caracteres.</p>
-        <label>
-          <span>Nueva contraseña temporal</span>
-          <div className="admin-password-input">
-            <input
-              required
-              minLength={8}
-              maxLength={128}
-              autoComplete="new-password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-            <button type="button" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} onClick={() => setShowPassword((value) => !value)}>
-              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
-        </label>
-        <label>
-          <span>Confirmar nueva contraseña</span>
-          <input
-            required
-            minLength={8}
-            maxLength={128}
-            autoComplete="new-password"
-            type={showPassword ? "text" : "password"}
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-          />
-        </label>
-        <button className="button ghost" type="submit" disabled={busy !== null}>
-          {busy === "password" ? <LoaderCircle className="spin" size={14} /> : null}
-          Asignar contraseña nueva
-        </button>
-      </form>
-      <div className="admin-delete-account">
-        <button className="button danger" type="button" disabled={busy !== null || Boolean(deleteBlockedReason)} onClick={deleteAccount}>
-          {busy === "delete" ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
-          Eliminar cuenta
-        </button>
-        {deleteBlockedReason && <small>{deleteBlockedReason}</small>}
-      </div>
-      {error && <div className="admin-account-message error">{error}</div>}
-      {success && <div className="admin-account-message success">{success}</div>}
-    </article>
-  );
-}
-
-export default function AdminAccounts({ onViewMissions }: { onViewMissions: (account: Account) => void }) {
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    api.adminFaenas()
-      .then(setAccounts)
-      .catch((requestError) => setError(requestError instanceof Error ? requestError.message : "No se pudieron cargar las cuentas."))
-      .finally(() => setLoading(false));
-  }, []);
-
-  function updateAccount(updated: Account) {
-    setAccounts((current) => current.map((account) => account.id === updated.id ? { ...account, ...updated } : account));
-  }
-
-  function removeAccount(deleted: Account) {
-    setAccounts((current) => current.filter((account) => account.id !== deleted.id));
-  }
-
-  function addAccount(created: Account) {
-    setAccounts((current) => [...current, created].sort((a, b) => a.nombre.localeCompare(b.nombre)));
-  }
-
-  return (
-    <section className="workspace admin-accounts">
-      <header className="admin-accounts-title">
-        <h2>Cuentas y accesos</h2>
-      </header>
-      <div className="admin-security-note">
-        Comparte las contraseñas nuevas por un canal privado.
-      </div>
-      {error && <div className="admin-account-message error">{error}</div>}
-      {loading ? (
-        <div className="admin-accounts-loading"><LoaderCircle className="spin" size={18} /> Cargando cuentas…</div>
-      ) : (
-        <>
-          <CreateAccountForm onCreated={addAccount} />
-          {accounts.length ? (
-            <div className="admin-accounts-grid">
-              {accounts.map((account) => (
-                <AccountCard key={account.id} account={account} onUpdated={updateAccount} onDeleted={removeAccount} onViewMissions={onViewMissions} />
-              ))}
-            </div>
-          ) : !error ? (
-            <div className="admin-accounts-loading">Todavía no hay cuentas; crea la primera con el formulario anterior.</div>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
-}
-
-function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => void }) {
-  const [nombre, setNombre] = useState("");
-  const [correo, setCorreo] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [nombre, setNombre] = useState(faena?.nombre ?? "");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [message, setMessage] = useState("");
 
-  async function createAccount(event: FormEvent) {
+  async function save(event: FormEvent) {
     event.preventDefault();
-    if (password !== confirmPassword) {
-      setError("Las contraseñas no coinciden.");
+    setBusy(true);
+    setMessage("");
+    try {
+      onSaved(await (faena ? api.updateFaena(faena.id, nombre) : api.createFaena(nombre)));
+      if (!faena) setNombre("");
+      setMessage(faena ? "Faena actualizada." : "Faena creada.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!faena || !window.confirm(`¿Eliminar la faena ${faena.nombre}?`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await api.deleteFaena(faena.id);
+      onDeleted?.();
+    } catch (error) {
+      setMessage(errorMessage(error));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card admin-create-account" onSubmit={save}>
+      <header><strong>{faena ? faena.nombre : "Crear faena"}</strong></header>
+      <div className="admin-create-fields">
+        <label><span>Nombre de la faena</span><input required maxLength={120} value={nombre} onChange={(e) => setNombre(e.target.value)} /></label>
+      </div>
+      <div className="admin-account-actions">
+        <button className="button primary" disabled={busy}>{faena ? "Guardar" : "Crear faena"}</button>
+        {faena && <>
+          <button className="button ghost" type="button" onClick={onViewMissions}>Ver misiones ({faena.misiones})</button>
+          <button className="button danger" type="button" disabled={busy || faena.misiones > 0} onClick={remove}>Eliminar faena</button>
+        </>}
+      </div>
+      {message && <p role="status">{message}</p>}
+    </form>
+  );
+}
+
+function UserForm({ faenas, onCreated }: { faenas: Faena[]; onCreated: (user: Account) => void }) {
+  const [rol, setRol] = useState<Account["rol"]>("operador");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function create(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const password = String(data.get("contrasena"));
+    if (password !== data.get("confirmacion")) {
+      setMessage("Las contraseñas no coinciden.");
       return;
     }
-
     setBusy(true);
-    setError("");
-    setSuccess("");
+    setMessage("");
     try {
-      const created = await api.createFaena(nombre, correo, password);
-      onCreated(created);
-      setNombre("");
-      setCorreo("");
-      setPassword("");
-      setConfirmPassword("");
-      setSuccess(`Cuenta creada para ${created.correo}. Comunica la contraseña por un canal privado.`);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo crear la cuenta.");
+      const user = await api.createUser(
+        String(data.get("nombre")), String(data.get("correo")), password, rol,
+        rol === "operador" ? String(data.get("id_faena")) : null,
+      );
+      onCreated(user);
+      form.reset();
+      setMessage(`Usuario creado para ${user.correo}.`);
+    } catch (error) {
+      setMessage(errorMessage(error));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form className="card admin-create-account" onSubmit={createAccount}>
-      <header><div><strong>Crear cuenta de faena</strong><span>Se asignará el rol de usuario de faena.</span></div></header>
+    <form className="card admin-create-account" onSubmit={create}>
+      <header><strong>Crear usuario</strong></header>
       <div className="admin-create-fields">
-        <label><span>Nombre de la faena</span><input required minLength={1} maxLength={120} value={nombre} onChange={(event) => setNombre(event.target.value)} /></label>
-        <label><span>Correo de acceso</span><input required type="email" maxLength={255} value={correo} onChange={(event) => setCorreo(event.target.value)} /></label>
-        <label>
-          <span>Contraseña inicial (mínimo 8 caracteres)</span>
-          <div className="admin-password-input">
-            <input required minLength={8} maxLength={128} autoComplete="new-password" type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} />
-            <button type="button" aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"} onClick={() => setShowPassword((value) => !value)}>
-              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
+        <label><span>Nombre</span><input name="nombre" required maxLength={120} /></label>
+        <label><span>Correo de acceso</span><input name="correo" type="email" required maxLength={255} /></label>
+        <label><span>Rol</span>
+          <select value={rol} onChange={(e) => setRol(e.target.value === "admin" ? "admin" : "operador")}>
+            <option value="operador">Operador</option>
+            <option value="admin">Administrador global</option>
+          </select>
         </label>
-        <label><span>Confirmar contraseña</span><input required minLength={8} maxLength={128} autoComplete="new-password" type={showPassword ? "text" : "password"} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+        {rol === "operador" && (
+          <label><span>Faena</span>
+            <select name="id_faena" required defaultValue="">
+              <option value="">Selecciona una faena</option>
+              {faenas.map((faena) => <option key={faena.id} value={faena.id}>{faena.nombre}</option>)}
+            </select>
+          </label>
+        )}
+        <label><span>Contraseña inicial</span><input name="contrasena" type="password" required minLength={8} maxLength={128} autoComplete="new-password" /></label>
+        <label><span>Confirmar contraseña</span><input name="confirmacion" type="password" required minLength={8} maxLength={128} autoComplete="new-password" /></label>
       </div>
-      <div className="admin-create-submit">
-        <button className="button primary" type="submit" disabled={busy}>
-          {busy ? <LoaderCircle className="spin" size={14} /> : null} Crear cuenta
-        </button>
-      </div>
-      {error && <div className="admin-account-message error">{error}</div>}
-      {success && <div className="admin-account-message success">{success}</div>}
+      <button className="button primary" disabled={busy || (rol === "operador" && !faenas.length)}>Crear usuario</button>
+      {message && <p role="status">{message}</p>}
     </form>
+  );
+}
+
+function UserRow({ user, faena }: { user: Account; faena?: Faena }) {
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function reset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const password = String(data.get("contrasena"));
+    if (password !== data.get("confirmacion")) {
+      setMessage("Las contraseñas no coinciden.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      await api.resetUserPassword(user.id, password);
+      form.reset();
+      setMessage("Contraseña actualizada.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className="card admin-create-account">
+      <header><strong>{user.nombre}</strong></header>
+      <span>{user.correo} · {user.rol === "admin" ? "Administrador global" : faena?.nombre ?? "Sin faena asignada"}</span>
+      <details>
+        <summary>Restablecer contraseña</summary>
+        <form className="admin-password-form" onSubmit={reset}>
+          <label><span>Nueva contraseña</span><input name="contrasena" type="password" required minLength={8} maxLength={128} autoComplete="new-password" /></label>
+          <label><span>Confirmar contraseña</span><input name="confirmacion" type="password" required minLength={8} maxLength={128} autoComplete="new-password" /></label>
+          <button className="button ghost" disabled={busy}>Guardar contraseña</button>
+          {message && <p role="status">{message}</p>}
+        </form>
+      </details>
+    </article>
+  );
+}
+
+export default function AdminAccounts({ onViewMissions, faenas, setFaenas }: {
+  onViewMissions: (faena: Faena) => void;
+  faenas: Faena[];
+  setFaenas: Dispatch<SetStateAction<Faena[]>>;
+}) {
+  const [users, setUsers] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([api.faenas(), api.users()])
+      .then(([loadedFaenas, loadedUsers]) => {
+        if (!active) return;
+        setFaenas(loadedFaenas);
+        setUsers(loadedUsers);
+      })
+      .catch((requestError) => { if (active) setError(errorMessage(requestError)); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [setFaenas]);
+
+  function updateFaenas(update: (current: Faena[]) => Faena[]) {
+    setFaenas((current) => update(current).sort((a, b) => a.nombre.localeCompare(b.nombre)));
+  }
+
+  return (
+    <section className="workspace admin-accounts">
+      <header className="admin-accounts-title"><h2>Cuentas y accesos</h2></header>
+      {loading ? <p>Cargando faenas y usuarios…</p> : error ? <p role="alert">{error}</p> : (
+        <>
+          <h3>Faenas</h3>
+          <FaenaForm onSaved={(faena) => updateFaenas((current) => [...current, faena])} />
+          <div className="admin-accounts-grid">
+            {faenas.map((faena) => <FaenaForm key={faena.id} faena={faena}
+              onSaved={(updated) => updateFaenas((current) => current.map((item) => item.id === updated.id ? updated : item))}
+              onDeleted={() => updateFaenas((current) => current.filter((item) => item.id !== faena.id))}
+              onViewMissions={() => onViewMissions(faena)} />)}
+          </div>
+          <h3>Usuarios</h3>
+          <UserForm faenas={faenas} onCreated={(user) => setUsers((current) => [...current, user])} />
+          <div className="admin-accounts-grid">
+            {users.map((user) => <UserRow key={user.id} user={user} faena={faenas.find((faena) => faena.id === user.id_faena)} />)}
+          </div>
+        </>
+      )}
+    </section>
   );
 }

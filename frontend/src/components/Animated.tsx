@@ -1,12 +1,7 @@
 import { animate } from "framer-motion";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 
-/**
- * Cuenta de forma animada desde el valor anterior hasta `value` cada vez que éste cambia.
- * Pensado para KPIs y métricas del dashboard: le da "vida" a los números sin requerir
- * ninguna librería de gráficos nueva.
- */
 export function AnimatedNumber({
   value,
   duration = 0.7,
@@ -21,7 +16,6 @@ export function AnimatedNumber({
   const isFirstRun = useRef(true);
 
   useEffect(() => {
-    // En el primer render se muestra el valor final de inmediato (evita animar desde 0 al cargar).
     if (isFirstRun.current) {
       isFirstRun.current = false;
       previous.current = value;
@@ -42,12 +36,10 @@ export function AnimatedNumber({
   return <>{format ? format(rounded) : rounded}</>;
 }
 
-/** Bloque "hueso" con efecto shimmer, usado como placeholder de carga. */
-export function Skeleton({ className = "", style }: { className?: string; style?: CSSProperties }) {
+function Skeleton({ className = "", style }: { className?: string; style?: CSSProperties }) {
   return <span className={`skeleton ${className}`} style={style} />;
 }
 
-/** Grilla de tarjetas placeholder para el historial de misiones mientras carga. */
 export function SkeletonCards({ count = 6 }: { count?: number }) {
   return (
     <div className="history-grid">
@@ -70,7 +62,6 @@ export function SkeletonCards({ count = 6 }: { count?: number }) {
   );
 }
 
-/** Placeholder de carga para el dashboard operacional (resumen + mapa + filtros). */
 export function SkeletonDashboard() {
   return (
     <div style={{ display: "grid", gap: 17 }}>
@@ -103,15 +94,6 @@ export function SkeletonDashboard() {
           <Skeleton style={{ width: "100%", height: 110, borderRadius: 10 }} />
         </div>
       </div>
-    </div>
-  );
-}
-
-/** Envoltura simple que hace aparecer su contenido con un leve desplazamiento hacia arriba. */
-export function FadeIn({ children, delay = 0, className = "" }: { children: ReactNode; delay?: number; className?: string }) {
-  return (
-    <div className={`fade-in-view ${className}`} style={{ animationDelay: `${delay}s` }}>
-      {children}
     </div>
   );
 }

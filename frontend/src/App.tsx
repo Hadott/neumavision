@@ -34,7 +34,7 @@ import DashboardStats from "./DashboardStats";
 import DashboardMap, { criticalityColor, criticalityLabel, criticalityOf, type Criticality } from "./DashboardMap";
 import Login from "./Login";
 import MapPanel from "./MapPanel";
-import type { Account, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, RoadWidth, Session } from "./types";
+import type { Faena, DashboardFinding, Detection, DetectionProgress, Health, InferenceHealth, InferenceInstance, ManualCriticality, Mission, MissionImage, MissionSummary, RepairStatus, ReviewStatus, RoadWidth, Session } from "./types";
 import { AnimatePresence, motion } from "framer-motion";
 import { AnimatedNumber, SkeletonCards, SkeletonDashboard } from "./components/Animated";
 
@@ -298,7 +298,7 @@ export default function App() {
   const [repairBusyId, setRepairBusyId] = useState("");
   const [dashTab, setDashTab] = useState<"mapa" | "estadisticas">("mapa");
   const [session, setSessionState] = useState<Session | null>(getSession());
-  const [faenas, setFaenas] = useState<Account[]>([]);
+  const [faenas, setFaenas] = useState<Faena[]>([]);
   const [faenaFiltro, setFaenaFiltro] = useState("");
   const [missionFaena, setMissionFaena] = useState("");
   const isAdmin = session?.cuenta.rol === "admin";
@@ -659,7 +659,7 @@ export default function App() {
     setError("");
   }
 
-  function viewAccountMissions(account: Account) {
+  function viewAccountMissions(account: Faena) {
     clearHistoryFilters();
     setFaenaFiltro(account.id);
     navigate(HISTORY_PATH);
@@ -823,8 +823,7 @@ export default function App() {
       const updated = await api.updateImageCriticality(mission.id, image.id, next);
       setMission((current) => current && ({
         ...current,
-        // Reemplaza la imagen completa: el backend puede confirmar automáticamente sus
-        // hallazgos pendientes al asignar una criticidad, y queremos reflejar eso también.
+        // La criticidad también puede confirmar hallazgos pendientes.
         images: current.images.map((item) => item.id === image.id ? updated : item)
       }));
     } catch (requestError) {
@@ -1020,7 +1019,7 @@ export default function App() {
               {autoShutdownError && <p className="jade-message error" role="alert">{autoShutdownError}</p>}
             </div>
           </section>
-          <AdminAccounts onViewMissions={viewAccountMissions} />
+          <AdminAccounts onViewMissions={viewAccountMissions} faenas={faenas} setFaenas={setFaenas} />
         </motion.div>
       )}
       {screen === "history" && (
