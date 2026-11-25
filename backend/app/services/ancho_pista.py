@@ -1,22 +1,22 @@
-"""
-medir_ancho.py - NeumaVision
-Mide el ancho de la pista a partir de la mascara del modelo de segmentacion (RF-DETR Seg)
-y lo clasifica como semaforo: Optimo / Moderado / Critico.
+"""Medición del ancho de pista a partir de una máscara de segmentación.
 
-Uso:
-  export PYTORCH_ENABLE_MPS_FALLBACK=1
-  python medir_ancho.py foto1.jpg foto2.jpg ...            # usa GSD del EXIF si existe
-  python medir_ancho.py --gsd 1.0 carpeta/*.jpg             # fuerza GSD en cm/px
+Desde backend/, se puede ejecutar la medición local con:
+    python -m app.services.ancho_pista foto.jpg --pesos pista.pt
 
-Salida: ~/Desktop/resultados_ancho/<foto>_ancho.jpg  +  anchos.csv
+Usa --gsd para indicar la escala en cm/px si la imagen carece de datos EXIF.
 """
-import argparse, csv, glob, os, random, sys
+
+import argparse
+import csv
+import glob
+import os
+import random
+
 import cv2
 import numpy as np
 from PIL import Image
 from skimage.morphology import skeletonize
 
-# ---------------- Parametros del proyecto ----------------
 ANCHO_CAMION_M = 7.3            # Komatsu 830E
 F_OPTIMO = 3.5                  # >= 3.5 W  -> Optimo (doble sentido, recta)
 F_CRITICO = 3.0                 # <  3.0 W  -> Critico
@@ -229,7 +229,6 @@ def medir(m, escala_px=1):
     return ys[sel], xs[sel], r[sel], valido[sel], nor[sel]
 
 
-# ---------------- Dibujo (panel y etiquetas) ----------------
 _FUENTES = {
     False: ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Helvetica.ttc",
             "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
@@ -298,14 +297,12 @@ def dibujar_panel(vis_bgr, estado, col, p10, med, gsd, fuente_gsd, pct, etiqueta
     d.rounded_rectangle([x0, y0, x0 + W, y0 + H], radius=int(18 * uc), fill=(255, 255, 255, 235))
     px = x0 + 20 * uc
     d.text((px, y0 + 16 * uc), "ANCHO DE PISTA", font=fuente(13 * uc, True), fill=(120, 120, 120, 255))
-    # pastilla de estado
     f_est = fuente(15 * uc, True)
     tw = d.textlength(estado.upper(), font=f_est)
     d.rounded_rectangle([x0 + W - tw - 46 * uc, y0 + 12 * uc, x0 + W - 16 * uc, y0 + 38 * uc],
                         radius=int(13 * uc), fill=rgb(col) + (255,))
     d.ellipse([x0 + W - tw - 38 * uc, y0 + 21 * uc, x0 + W - tw - 30 * uc, y0 + 29 * uc], fill=(255, 255, 255, 255))
     d.text((x0 + W - tw - 24 * uc, y0 + 16 * uc), estado.upper(), font=f_est, fill=(255, 255, 255, 255))
-    # cifra principal
     num = f"{p10:.1f} m".replace(".", ",") if p10 else "—"
     d.text((px, y0 + 46 * uc), num, font=fuente(44 * uc, True), fill=(30, 30, 30, 255))
     d.text((px, y0 + 98 * uc), "ancho mínimo del tramo", font=fuente(14 * uc), fill=(110, 110, 110, 255))
@@ -326,7 +323,6 @@ def dibujar_panel(vis_bgr, estado, col, p10, med, gsd, fuente_gsd, pct, etiqueta
             return min(0.65 + 0.35 * (v - lim_o) / (lim_o * 0.4), 1.0)
         mx = px + pos(p10) * bw
         d.polygon([(mx - 7 * uc, by - 10 * uc), (mx + 7 * uc, by - 10 * uc), (mx, by - 1 * uc)], fill=(30, 30, 30, 255))
-    # detalle
     f_d = fuente(13 * uc)
     med_t = f"{med:.1f} m".replace(".", ",") if med else "—"
     gsd_t = f"{gsd:.2f} cm/px ({fuente_gsd})".replace(".", ",") if gsd else "desconocido"

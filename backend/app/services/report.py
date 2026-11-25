@@ -402,7 +402,7 @@ def build_report(
 
     story = []
 
-    # ---- Cover: branding and title only (running header/footer drawn on the canvas) ----
+    # Portada
     top_row_cells = []
     if LOGO_PATH.exists():
         logo = Image(str(LOGO_PATH), width=26 * mm, height=26 * mm)
@@ -452,7 +452,7 @@ def build_report(
         story.append(warning)
     story.append(PageBreak())
 
-    # ---- Executive summary ----
+    # Resumen ejecutivo
     story.append(Paragraph("Resumen ejecutivo", styles["h1"]))
     story.append(Paragraph(
         "Este informe reemplaza el levantamiento manual de anomalías del camino: identifica rocas y acumulaciones "
@@ -574,7 +574,7 @@ def build_report(
     story.append(CondPageBreak(35 * mm))
     story.append(Spacer(1, 6 * mm))
 
-    # ---- Per-image finding cards ----
+    # Fichas por imagen
     story.append(Paragraph("Fichas de hallazgos por imagen", styles["h1"]))
     story.append(Paragraph(
         "Cada ficha muestra la imagen con los hallazgos activos marcados, su ubicación cuando está disponible, la "
@@ -626,8 +626,7 @@ def build_report(
                     colWidths=[144 * mm],
                 )
             )
-        # Un bloque por clase (no uno por deteccion): con muchas rocas en una imagen,
-        # un bloque por deteccion hacia que la ficha no cupiera en una pagina.
+        # Agrupar por clase mantiene la ficha dentro de una página.
         groups: dict[str, list[Deteccion]] = {}
         for detection in image_detections:
             groups.setdefault(detection.clase, []).append(detection)
@@ -716,7 +715,7 @@ def build_report(
     if card_number == 0:
         story.append(Paragraph("No hay hallazgos activos (confirmados o pendientes) en esta misión.", styles["body"]))
 
-    # ---- Discarded findings (audit trail) ----
+    # Hallazgos descartados
     if discarded:
         story.append(CondPageBreak(70 * mm))
         story.append(Spacer(1, 6 * mm))

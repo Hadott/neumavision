@@ -258,7 +258,6 @@ class NeumaVisionDetector:
         self.rock_model = YOLO(str(settings.rock_model_path))
         self.road_model = RFDETRSegMedium(pretrain_weights=str(settings.road_model_path))
 
-    # ---- rocas ----
     def _rocks(self, rgb) -> list[tuple[float, float, float, float, float]]:
         import numpy as np
 
@@ -284,7 +283,6 @@ class NeumaVisionDetector:
                 boxes.append((x1 + ox, y1 + oy, x2 + ox, y2 + oy, float(conf)))
         return boxes
 
-    # ---- pista ----
     def _road_mask(self, rgb):
         """Mascara limpia de la pista y la confianza del modelo de segmentacion."""
         from app.services import ancho_pista
@@ -307,7 +305,6 @@ class NeumaVisionDetector:
         mask, road_conf, road_class = self._road_mask(rgb)
         has_road = bool(mask.any())
 
-        # ancho de pista
         save_road_width(image_path, bgr, mask, road_conf, road_class)
 
         # rocas filtradas por la pista (margen para bermas/bordes)
@@ -332,7 +329,6 @@ class NeumaVisionDetector:
 
 @lru_cache(maxsize=1)
 def _neumavision_detector() -> NeumaVisionDetector:
-    # Los modelos se cargan una sola vez por proceso.
     return NeumaVisionDetector()
 
 
