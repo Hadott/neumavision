@@ -36,6 +36,7 @@ Linux o macOS:
 source .venv/bin/activate
 pip install -r requirements.txt
 # Create backend/.env locally and configure DATABASE_URL as described below.
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -98,10 +99,12 @@ un administrador; no hay registro público ni recuperación por correo.
 | `POST` | `/api/v1/auth/login` | Inicia sesión y entrega un token |
 | `GET` | `/api/v1/auth/me` | Devuelve la cuenta autenticada |
 | `GET` | `/api/v1/auth/faenas` | Lista faenas (solo administrador) |
-| `GET` | `/api/v1/auth/admin/faenas` | Lista cuentas y cantidad de misiones (solo administrador) |
-| `POST` | `/api/v1/auth/admin/faenas` | Crea una cuenta de faena (solo administrador) |
-| `PATCH` | `/api/v1/auth/admin/faenas/{id}` | Actualiza nombre y correo (solo administrador) |
-| `PUT` | `/api/v1/auth/faenas/{id}/password` | Restablece contraseña (solo administrador) |
+| `GET` | `/api/v1/auth/admin/faenas` | Lista faenas y cantidad de misiones (solo administrador) |
+| `POST` | `/api/v1/auth/admin/faenas` | Crea una faena por nombre (solo administrador) |
+| `PATCH` | `/api/v1/auth/admin/faenas/{id}` | Actualiza el nombre (solo administrador) |
+| `GET` | `/api/v1/auth/admin/usuarios` | Lista usuarios (solo administrador) |
+| `POST` | `/api/v1/auth/admin/usuarios` | Crea un usuario y asigna la faena de operadores (solo administrador) |
+| `PUT` | `/api/v1/auth/admin/usuarios/{id}/password` | Restablece contraseña (solo administrador) |
 | `POST` | `/api/v1/missions` | Crea una misión y sube imágenes |
 | `POST` | `/api/v1/missions/demo` | Genera imágenes demo |
 | `POST` | `/api/v1/missions/{id}/detect` | Ejecuta el detector configurado |
@@ -112,13 +115,10 @@ un administrador; no hay registro público ni recuperación por correo.
 El restablecimiento administrativo requiere un token Bearer de administrador y
 una contraseña de al menos 8 caracteres. No existe un endpoint público de
 restablecimiento; usa HTTPS fuera del entorno local. Envía
-`PUT /api/v1/auth/faenas/{faena_id}/password` con el cuerpo
+`PUT /api/v1/auth/admin/usuarios/{id}/password` con el cuerpo
 `{"contrasena":"nueva-clave"}`.
 
-La creación de cuentas también requiere un token Bearer de administrador y
-asigna siempre el rol `faena`; el cuerpo de
-`POST /api/v1/auth/admin/faenas` es
-`{"nombre":"Faena","correo":"contacto@empresa.cl","contrasena":"clave-inicial"}`.
+En **Cuentas y accesos**, el administrador crea faenas por nombre y da de alta usuarios con correo y contraseña. Los operadores requieren una faena y los administradores globales tienen acceso a todas. En una base nueva, crea el primer administrador después de migrar mediante `python -m app.cuentas crear --nombre "Administrador" --correo admin@empresa.cl --admin`.
 
 ## Pruebas
 

@@ -19,7 +19,7 @@ Posteriormente permitirá visualizar los hallazgos y generar un informe final de
 
 El MVP debe permitir:
 
-1. Inicio de sesión por faena.
+1. Inicio de sesión individual de operadores asignados a una faena.
 2. Crear una misión de inspección.
 3. Subir un lote de imágenes.
 4. Guardar las imágenes en Amazon S3.
@@ -41,7 +41,6 @@ Fuera del MVP:
 - Reconstrucción 3D.
 - RabbitMQ.
 - Arquitecturas distribuidas complejas.
-- Múltiples tipos de usuario.
 
 ## 3. Arquitectura general
 
@@ -171,9 +170,10 @@ No se instalará PostgreSQL manualmente en EC2.
 
 ## 5. Modelo Entidad-Relación
 
-Las entidades definitivas del MVP son:
+Las entidades del MVP son:
 
 - FAENA
+- USUARIO
 - MISION
 - IMAGEN
 - DETECCION
@@ -181,17 +181,17 @@ Las entidades definitivas del MVP son:
 
 ### FAENA
 
-La faena representa directamente la cuenta que inicia sesión.
-
-No existe una entidad USUARIO independiente.
+La faena agrupa las misiones y los operadores.
 
 Campos:
 
 - `id_faena` PK
 - `nombre`
-- `email`
-- `password_hash`
 - `fecha_creacion`
+
+### USUARIO
+
+Cuenta individual con nombre, correo, hash de contraseña y rol. Cada operador con acceso pertenece a una faena mediante `id_faena`. Una faena puede tener varios operadores. Las misiones se autorizan por esa asignación. El administrador global configura usuarios y faenas.
 
 ### MISION
 
@@ -307,7 +307,7 @@ MISION 1:0..1 INFORME
 ## 6. MER resumido
 
 ```text
-FAENA
+FAENA -------- 1:0..N -------- USUARIO
   |
   | 1:N
   v
@@ -324,8 +324,8 @@ DETECCION
 
 ## 7. Flujo principal de una misión
 
-1. La faena inicia sesión.
-2. La faena crea una misión.
+1. El operador inicia sesión.
+2. El operador crea una misión para su faena.
 3. Se carga un lote de imágenes.
 4. El backend crea los registros de imágenes.
 5. Las imágenes se almacenan en S3.
@@ -412,12 +412,12 @@ Después del login, el backend debe conocer `id_faena`.
 
 Nunca confiar en un `id_faena` enviado por el frontend para autorizar acceso.
 
-El backend debe obtener la faena autenticada desde la sesión o token.
+El backend identifica al operador desde el token y consulta en la base de datos la faena asignada.
 
 Ejemplo:
 
 ```text
-Faena autenticada:
+Faena asignada al operador:
 id_faena = 3
 
 Solo puede consultar:

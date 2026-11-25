@@ -27,7 +27,7 @@ def test_admin_controls_auto_shutdown(manager, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import main
-    from app.models import Faena
+    from app.models import Usuario
     from app.services.auth import get_current_faena
 
     monkeypatch.setattr(main, "jade", manager)
@@ -35,7 +35,7 @@ def test_admin_controls_auto_shutdown(manager, monkeypatch):
     monkeypatch.setattr(manager.ec2.describe_instances, "return_value", instance("running"))
     clock = Mock(return_value=100)
     monkeypatch.setattr(lifecycle, "monotonic", clock)
-    actor = Faena(rol="faena")
+    actor = Usuario(rol="operador")
     monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: actor)
     client = TestClient(main.app)
     url = f"{settings.api_prefix}/inference/auto-shutdown"
@@ -244,11 +244,11 @@ def test_admin_can_stop_jade(manager, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import main
-    from app.models import Faena
+    from app.models import Usuario
     from app.services.auth import get_current_faena
 
     monkeypatch.setattr(main, "jade", manager)
-    actor = Faena(rol="faena")
+    actor = Usuario(rol="operador")
     monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: actor)
     client = TestClient(main.app)
     url = f"{settings.api_prefix}/inference/stop"
@@ -273,11 +273,11 @@ def test_stop_is_refused_while_a_mission_runs(manager, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import main
-    from app.models import Faena
+    from app.models import Usuario
     from app.services.auth import get_current_faena
 
     monkeypatch.setattr(main, "jade", manager)
-    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: Faena(rol="admin"))
+    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: Usuario(rol="admin"))
     manager.ec2.describe_instances.return_value = instance("running")
     manager.missions.add("mision-en-curso")
 
@@ -292,11 +292,11 @@ def test_stop_reports_aws_errors(manager, monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import main
-    from app.models import Faena
+    from app.models import Usuario
     from app.services.auth import get_current_faena
 
     monkeypatch.setattr(main, "jade", manager)
-    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: Faena(rol="admin"))
+    monkeypatch.setitem(main.app.dependency_overrides, get_current_faena, lambda: Usuario(rol="admin"))
     manager.ec2.describe_instances.return_value = instance("running")
     manager.ec2.stop_instances.side_effect = ClientError({"Error": {"Code": "UnauthorizedOperation"}}, "StopInstances")
 

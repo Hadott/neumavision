@@ -50,6 +50,7 @@ No agregar nuevas entidades sin necesidad real.
 Entidades actuales:
 
 - FAENA
+- USUARIO
 - MISION
 - IMAGEN
 - DETECCION
@@ -58,6 +59,7 @@ Entidades actuales:
 Cardinalidades:
 
 ```text
+FAENA 1:0..N USUARIO (rol operador)
 FAENA 1:N MISION
 MISION 1:N IMAGEN
 IMAGEN 1:0..N DETECCION
@@ -66,9 +68,11 @@ MISION 1:0..1 INFORME
 
 ### FAENA
 
-La faena es la cuenta autenticada.
+La faena agrupa operadores y misiones. Tiene nombre y fecha de creación.
 
-No crear una entidad `USUARIO` por ahora.
+### USUARIO
+
+Es la cuenta individual de acceso, con correo y hash de contraseña. El rol `operador` requiere una faena. El rol `admin` administra todas las faenas.
 
 ### MISION
 
@@ -124,7 +128,7 @@ La separación de datos entre faenas es obligatoria.
 
 Nunca confiar en `id_faena` proporcionado por el frontend para autorizar operaciones.
 
-La faena debe obtenerse desde el contexto autenticado.
+Para los operadores, la faena se obtiene de la asignación guardada en el backend a partir de la identidad autenticada.
 
 Toda operación sobre:
 
@@ -133,7 +137,7 @@ Toda operación sobre:
 - detecciones;
 - informes;
 
-debe verificar directa o indirectamente que el recurso pertenece a la faena autenticada.
+debe verificar directa o indirectamente que el recurso pertenece a la faena asignada al operador.
 
 Una faena nunca debe poder consultar datos de otra.
 

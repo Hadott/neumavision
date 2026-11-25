@@ -1,290 +1,118 @@
-from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.database import get_session
 from app.main import app
-from app.models import Faena
-from app.services.auth import get_current_faena
-from app.services.passwords import hash_password, verify_password
+from app.models import Faena, Mision, Usuario
+from app.services.passwords import hash_password
 
 
-class FakeSession:
-    def __init__(self, target: Faena | None) -> None:
-        self.target = target
-        self.added: Faena | None = None
-        self.committed = False
-        self.refreshed: Faena | None = None
-        self.deleted: Faena | None = None
-        self.first_result: object = None
-
-    def get(self, model: type[Faena], faena_id: str) -> Faena | None:
-        assert model is Faena
-        return self.target if self.target and self.target.id_faena == faena_id else None
-
-    def add(self, faena: Faena) -> None:
-        self.added = faena
-
-    def commit(self) -> None:
-        self.committed = True
-
-    def exec(self, statement: object) -> "FakeResult":
-        return FakeResult(self.first_result)
-
-    def delete(self, faena: Faena) -> None:
-        self.deleted = faena
-
-    def refresh(self, faena: Faena) -> None:
-        self.refreshed = faena
-
-    def rollback(self) -> None:
-        self.committed = False
-
-
-class FakeResult:
-    def __init__(self, value: object = None) -> None:
-        self.value = value
-
-    def first(self) -> object:
-        return self.value
+AUTH = "/api/v1/auth"
+MISSIONS = "/api/v1/missions"
 
 
 @pytest.fixture
-def client_for_role() -> Iterator[tuple[TestClient, FakeSession]]:
-    target = Faena(
-        id_faena="target-faena",
-        nombre="Faena de prueba",
-        correo="faena@example.test",
-        hash_contrasena=hash_password("old-password"),
-        rol="faena",
-    )
-    session = FakeSession(target)
-    actor = Faena(
-        id_faena="actor",
-        nombre="Administrador de prueba",
-        correo="admin@example.test",
-        hash_contrasena=hash_password("admin-password"),
-        rol="admin",
-    )
-    app.dependency_overrides[get_current_faena] = lambda: actor
-    app.dependency_overrides[get_session] = lambda: session
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'auth.db'}")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(Usuario(
+            nombre="Admin", correo="admin@example.test", rol="admin",
+            hash_contrasena=hash_password("admin-password"),
+        ))
+        session.add_all([Faena(id_faena="norte", nombre="Norte"), Faena(id_faena="sur", nombre="Sur")])
+        session.add_all([
+            Mision(id_mision="m-norte", id_faena="norte", nombre="Misión norte"),
+            Mision(id_mision="m-sur", id_faena="sur", nombre="Misión sur"),
+        ])
+        session.commit()
+
+    def get_test_session():
+        with Session(engine) as session:
+            yield session
+
+    monkeypatch.setitem(app.dependency_overrides, get_session, get_test_session)
     try:
-        yield TestClient(app), session
+        yield TestClient(app)
     finally:
-        app.dependency_overrides.clear()
+        engine.dispose()
 
 
-def test_admin_can_reset_faena_password(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.put(
-        "/api/v1/auth/faenas/target-faena/password",
-        json={"contrasena": "new-password-123"},
-    )
-
-    assert response.status_code == 204
-    assert session.committed
-    assert session.added is session.target
-    assert verify_password("new-password-123", session.target.hash_contrasena)
-    assert not verify_password("old-password", session.target.hash_contrasena)
-
-
-def test_password_reset_rejects_non_admin(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-    actor = Faena(
-        id_faena="actor",
-        nombre="Faena",
-        correo="user@example.test",
-        hash_contrasena=hash_password("user-password"),
-        rol="faena",
-    )
-    app.dependency_overrides[get_current_faena] = lambda: actor
-
-    response = client.put(
-        "/api/v1/auth/faenas/target-faena/password",
-        json={"contrasena": "new-password-123"},
-    )
-
-    assert response.status_code == 403
-    assert not session.committed
-
-
-def test_password_reset_requires_authentication() -> None:
-    app.dependency_overrides[get_session] = lambda: FakeSession(None)
-    try:
-        response = TestClient(app).put(
-            "/api/v1/auth/faenas/target-faena/password",
-            json={"contrasena": "new-password-123"},
-        )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 401
-
-
-def test_password_reset_returns_not_found_for_unknown_faena(
-    client_for_role: tuple[TestClient, FakeSession],
-) -> None:
-    client, session = client_for_role
-
-    response = client.put(
-        "/api/v1/auth/faenas/missing/password",
-        json={"contrasena": "new-password-123"},
-    )
-
-    assert response.status_code == 404
-    assert not session.committed
-
-
-def test_password_reset_validates_minimum_length(
-    client_for_role: tuple[TestClient, FakeSession],
-) -> None:
-    client, session = client_for_role
-
-    response = client.put(
-        "/api/v1/auth/faenas/target-faena/password",
-        json={"contrasena": "short"},
-    )
-
-    assert response.status_code == 422
-    assert not session.committed
-
-
-def test_admin_can_create_faena_account(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.post(
-        "/api/v1/auth/admin/faenas",
-        json={
-            "nombre": "Nueva faena",
-            "correo": " NUEVA@example.test ",
-            "contrasena": "initial-password-123",
-        },
-    )
-
-    assert response.status_code == 201
-    assert response.json()["nombre"] == "Nueva faena"
-    assert response.json()["correo"] == "nueva@example.test"
-    assert response.json()["rol"] == "faena"
-    assert response.json()["misiones"] == 0
-    assert session.committed
-    assert session.refreshed is session.added
-    assert session.added is not None
-    assert verify_password("initial-password-123", session.added.hash_contrasena)
-
-
-def test_create_faena_rejects_non_admin(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-    actor = Faena(
-        id_faena="actor",
-        nombre="Faena",
-        correo="user@example.test",
-        hash_contrasena=hash_password("user-password"),
-        rol="faena",
-    )
-    app.dependency_overrides[get_current_faena] = lambda: actor
-
-    response = client.post(
-        "/api/v1/auth/admin/faenas",
-        json={
-            "nombre": "Nueva faena",
-            "correo": "nueva@example.test",
-            "contrasena": "initial-password-123",
-        },
-    )
-
-    assert response.status_code == 403
-    assert not session.committed
-
-
-def test_create_faena_validates_password_length(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.post(
-        "/api/v1/auth/admin/faenas",
-        json={"nombre": "Nueva faena", "correo": "nueva@example.test", "contrasena": "short"},
-    )
-
-    assert response.status_code == 422
-    assert not session.committed
-
-
-def test_admin_can_update_account_name_and_email(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.patch(
-        "/api/v1/auth/admin/faenas/target-faena",
-        json={"nombre": "Nueva faena", "correo": " NUEVO@example.test "},
-    )
-
+def login(client: TestClient, correo: str, password: str) -> tuple[dict, dict[str, str]]:
+    response = client.post(f"{AUTH}/login", json={"correo": correo, "contrasena": password})
     assert response.status_code == 200
-    assert response.json()["nombre"] == "Nueva faena"
-    assert response.json()["correo"] == "nuevo@example.test"
-    assert session.target.nombre == "Nueva faena"
-    assert session.target.correo == "nuevo@example.test"
-    assert session.committed
+    result = response.json()
+    return result["cuenta"], {"Authorization": f"Bearer {result['token']}"}
 
 
-def test_account_update_rejects_invalid_email(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
+def test_faenas_have_no_credentials(client: TestClient) -> None:
+    admin, headers = login(client, "admin@example.test", "admin-password")
+    assert admin["rol"] == "admin"
+    assert admin["id_faena"] is None
+    assert client.get(f"{AUTH}/faenas").status_code == 401
 
-    response = client.patch(
-        "/api/v1/auth/admin/faenas/target-faena",
-        json={"nombre": "Nueva faena", "correo": "invalid-email"},
-    )
-
-    assert response.status_code == 422
-    assert not session.committed
-
-
-def test_admin_can_delete_account_without_missions(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.delete("/api/v1/auth/admin/faenas/target-faena")
-
-    assert response.status_code == 204
-    assert session.deleted is session.target
-    assert session.committed
+    created = client.post(f"{AUTH}/admin/faenas", json={"nombre": " Nueva "}, headers=headers)
+    assert created.status_code == 201
+    faena_id = created.json()["id"]
+    assert created.json() == {"id": faena_id, "nombre": "Nueva", "misiones": 0}
+    path = f"{AUTH}/admin/faenas/{faena_id}"
+    assert client.patch(path, json={"nombre": " "}, headers=headers).status_code == 422
+    assert client.patch(path, json={"nombre": "Renombrada"}, headers=headers).json()["nombre"] == "Renombrada"
+    assert client.delete(path, headers=headers).status_code == 204
+    assert client.delete(path, headers=headers).status_code == 404
+    assert client.delete(f"{AUTH}/admin/faenas/norte", headers=headers).status_code == 409
 
 
-def test_delete_account_with_missions_is_rejected(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-    session.first_result = "mision-1"
+def test_operators_share_only_their_faena_missions(client: TestClient) -> None:
+    _, admin_headers = login(client, "admin@example.test", "admin-password")
+    path = f"{AUTH}/admin/usuarios"
+    for nombre in ("Ana", "Luis"):
+        correo = f"{nombre.lower()}@example.test"
+        payload = {"nombre": nombre, "correo": f" {correo.upper()} ", "contrasena": "operador-password"}
+        assert client.post(path, json=payload, headers=admin_headers).status_code == 422
+        assert client.post(path, json={**payload, "id_faena": "missing"}, headers=admin_headers).status_code == 404
 
-    response = client.delete("/api/v1/auth/admin/faenas/target-faena")
+        payload["id_faena"] = "norte"
+        created = client.post(path, json=payload, headers=admin_headers)
+        assert created.status_code == 201
+        assert "hash_contrasena" not in created.json()
+        assert client.post(path, json=payload, headers=admin_headers).status_code == 409
+        cuenta, headers = login(client, correo, "operador-password")
+        assert cuenta == created.json()
+        assert cuenta["rol"] == "operador"
+        assert client.get(f"{AUTH}/me", headers=headers).json() == cuenta
+        assert client.get(path, headers=headers).status_code == 403
+        assert client.post(path, json=payload, headers=headers).status_code == 403
+        assert client.post(f"{AUTH}/admin/faenas", json={"nombre": "Otra"}, headers=headers).status_code == 403
+        assert client.get(f"{MISSIONS}/m-norte", headers=headers).status_code == 200
+        assert client.get(f"{MISSIONS}/m-sur", headers=headers).status_code == 404
+        listed = client.get(MISSIONS, params={"faena_id": "sur"}, headers=headers)
+        assert [mission["id"] for mission in listed.json()] == ["m-norte"]
 
-    assert response.status_code == 409
-    assert "misiones" in response.json()["detail"]
-    assert session.deleted is None
-    assert not session.committed
+        reset = f"{path}/{cuenta['id']}/password"
+        assert client.put(reset, json={"contrasena": "new-password"}, headers=headers).status_code == 403
+        assert client.put(reset, json={"contrasena": "short"}, headers=admin_headers).status_code == 422
+        assert client.put(reset, json={"contrasena": "new-password"}, headers=admin_headers).status_code == 204
+        assert client.post(f"{AUTH}/login", json={"correo": correo, "contrasena": "operador-password"}).status_code == 401
+        login(client, correo, "new-password")
+
+    listed = client.get(path, headers=admin_headers)
+    assert [user["nombre"] for user in listed.json()] == ["Admin", "Ana", "Luis"]
 
 
-def test_admin_cannot_delete_own_account(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.delete("/api/v1/auth/admin/faenas/actor")
-
-    assert response.status_code == 409
-    assert session.deleted is None
-
-
-def test_delete_account_rejects_non_admin(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-    app.dependency_overrides[get_current_faena] = lambda: Faena(
-        id_faena="otra", nombre="Otra", correo="otra@example.test", hash_contrasena="x", rol="faena"
-    )
-
-    response = client.delete("/api/v1/auth/admin/faenas/target-faena")
-
-    assert response.status_code == 403
-    assert session.deleted is None
-
-
-def test_delete_account_returns_not_found(client_for_role: tuple[TestClient, FakeSession]) -> None:
-    client, session = client_for_role
-
-    response = client.delete("/api/v1/auth/admin/faenas/no-existe")
-
-    assert response.status_code == 404
-    assert session.deleted is None
+def test_admin_user_can_manage_all_faenas(client: TestClient) -> None:
+    _, headers = login(client, "admin@example.test", "admin-password")
+    payload = {
+        "nombre": "Otro Admin", "correo": "otro@example.test", "contrasena": "admin-password", "rol": "admin",
+    }
+    path = f"{AUTH}/admin/usuarios"
+    assert client.post(path, json={**payload, "id_faena": "sur"}, headers=headers).status_code == 422
+    response = client.post(path, json=payload, headers=headers)
+    assert response.status_code == 201
+    assert response.json()["id_faena"] is None
+    _, global_headers = login(client, "otro@example.test", "admin-password")
+    assert client.get(f"{MISSIONS}/m-norte", headers=global_headers).status_code == 200
+    assert client.get(f"{MISSIONS}/m-sur", headers=global_headers).status_code == 200

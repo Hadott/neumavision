@@ -1,18 +1,20 @@
 import re
+from typing import Annotated, Literal
 
+from fastapi import APIRouter, Depends, HTTPException
+from pwdlib.exceptions import UnknownHashError
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import Faena, Mision
+from app.models import Faena, Mision, Usuario
 from app.services.auth import CurrentFaena, create_token, is_admin
 from app.services.passwords import hash_password, verify_password
 
-
 router = APIRouter(prefix="/auth", tags=["auth"])
+Password = Annotated[str, Field(min_length=8, max_length=128)]
 
 
 class LoginRequest(BaseModel):
@@ -20,17 +22,25 @@ class LoginRequest(BaseModel):
     contrasena: str
 
 
-class PasswordResetRequest(BaseModel):
-    contrasena: str = Field(min_length=8, max_length=128)
-
-
-class AccountUpdateRequest(BaseModel):
+class FaenaWrite(BaseModel):
     nombre: str = Field(min_length=1, max_length=120)
+
+
+class UserCreate(FaenaWrite):
     correo: str = Field(min_length=3, max_length=255)
+    contrasena: Password
+    rol: Literal["admin", "operador"] = "operador"
+    id_faena: str | None = None
 
 
-class AccountCreateRequest(AccountUpdateRequest):
-    contrasena: str = Field(min_length=8, max_length=128)
+class PasswordReset(BaseModel):
+    contrasena: Password
+
+
+class FaenaRead(BaseModel):
+    id: str
+    nombre: str
+    misiones: int = 0
 
 
 class AccountRead(BaseModel):
@@ -38,10 +48,7 @@ class AccountRead(BaseModel):
     nombre: str
     correo: str
     rol: str
-
-
-class AdminAccountRead(AccountRead):
-    misiones: int
+    id_faena: str | None
 
 
 class LoginResponse(BaseModel):
@@ -49,165 +56,140 @@ class LoginResponse(BaseModel):
     cuenta: AccountRead
 
 
-def serialize_account(faena: Faena) -> AccountRead:
-    return AccountRead(id=faena.id_faena, nombre=faena.nombre, correo=faena.correo, rol=faena.rol or "faena")
+def require_admin(cuenta: CurrentFaena) -> Usuario:
+    if not is_admin(cuenta):
+        raise HTTPException(403, "Solo disponible para administradores.")
+    return cuenta
+
+
+Admin = Annotated[Usuario, Depends(require_admin)]
+
+
+def require_faena(session: Session, faena_id: str, *, lock: bool = False) -> Faena:
+    faena = session.get(Faena, faena_id, with_for_update=lock)
+    if faena is None:
+        raise HTTPException(404, "Faena no encontrada.")
+    return faena
+
+
+def normalize_name(nombre: str) -> str:
+    nombre = nombre.strip()
+    if not nombre:
+        raise HTTPException(422, "El nombre es obligatorio.")
+    return nombre
+
+
+def serialize_user(user: Usuario) -> AccountRead:
+    return AccountRead(
+        id=user.id_usuario, nombre=user.nombre, correo=user.correo, rol=user.rol, id_faena=user.id_faena,
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
 def login(payload: LoginRequest, session: Session = Depends(get_session)) -> LoginResponse:
     correo = payload.correo.strip().lower()
-    faena = session.exec(select(Faena).where(Faena.correo == correo)).first()
-    valid = False
-    if faena is not None:
+    user = session.exec(
+        select(Usuario).where(Usuario.correo == correo, Usuario.hash_contrasena.is_not(None))
+    ).first()
+    if user and user.hash_contrasena and (is_admin(user) or user.id_faena):
         try:
-            valid = verify_password(payload.contrasena, faena.hash_contrasena)
-        except Exception:
-            # Cuentas sin contraseña configurada (hash no valido) no pueden iniciar sesion.
-            valid = False
-    if not valid or faena is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Correo o contraseña incorrectos.")
-    return LoginResponse(token=create_token(faena.id_faena), cuenta=serialize_account(faena))
+            if verify_password(payload.contrasena, user.hash_contrasena):
+                return LoginResponse(token=create_token(user.id_usuario), cuenta=serialize_user(user))
+        except (UnknownHashError, ValueError):
+            pass
+    raise HTTPException(401, "Correo o contraseña incorrectos.")
 
 
 @router.get("/me", response_model=AccountRead)
 def me(cuenta: CurrentFaena) -> AccountRead:
-    return serialize_account(cuenta)
+    return serialize_user(cuenta)
 
 
-@router.get("/faenas", response_model=list[AccountRead])
-def list_faenas(cuenta: CurrentFaena, session: Session = Depends(get_session)) -> list[AccountRead]:
-    """Lista de faenas cliente (solo administrador), para filtrar y asignar misiones."""
-    if not is_admin(cuenta):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
-    faenas = session.exec(select(Faena).order_by(Faena.nombre)).all()
-    return [serialize_account(item) for item in faenas if (item.rol or "faena") != "admin"]
+@router.get("/admin/usuarios", response_model=list[AccountRead])
+def list_users(_: Admin, session: Session = Depends(get_session)) -> list[AccountRead]:
+    return [serialize_user(user) for user in session.exec(select(Usuario).order_by(Usuario.nombre)).all()]
 
 
-@router.get("/admin/faenas", response_model=list[AdminAccountRead])
-def list_admin_faenas(cuenta: CurrentFaena, session: Session = Depends(get_session)) -> list[AdminAccountRead]:
-    if not is_admin(cuenta):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
-
-    faenas = session.exec(select(Faena).order_by(Faena.nombre)).all()
-    mission_counts = dict(
-        session.exec(select(Mision.id_faena, func.count(Mision.id_mision)).group_by(Mision.id_faena)).all()
-    )
-    return [
-        AdminAccountRead(
-            **serialize_account(faena).model_dump(),
-            misiones=mission_counts.get(faena.id_faena, 0),
-        )
-        for faena in faenas
-    ]
-
-
-@router.post("/admin/faenas", response_model=AdminAccountRead, status_code=status.HTTP_201_CREATED)
-def create_faena(
-    payload: AccountCreateRequest,
-    cuenta: CurrentFaena,
-    session: Session = Depends(get_session),
-) -> AdminAccountRead:
-    if not is_admin(cuenta):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
-
-    nombre = payload.nombre.strip()
+@router.post("/admin/usuarios", response_model=AccountRead, status_code=201)
+def create_user(payload: UserCreate, _: Admin, session: Session = Depends(get_session)) -> AccountRead:
+    nombre = normalize_name(payload.nombre)
     correo = payload.correo.strip().lower()
-    if not nombre:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="El nombre es obligatorio.")
     if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo) is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Correo electrónico inválido.")
-    if session.exec(select(Faena).where(Faena.correo == correo)).first() is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese correo ya está asociado a otra cuenta.")
+        raise HTTPException(422, "Correo electrónico inválido.")
+    if payload.rol == "operador":
+        if not payload.id_faena:
+            raise HTTPException(422, "Selecciona una faena para el operador.")
+        require_faena(session, payload.id_faena, lock=True)
+    elif payload.id_faena is not None:
+        raise HTTPException(422, "El administrador global no requiere una faena.")
 
-    faena = Faena(
-        nombre=nombre,
-        correo=correo,
-        hash_contrasena=hash_password(payload.contrasena),
-        rol="faena",
+    user = Usuario(
+        nombre=nombre, correo=correo, hash_contrasena=hash_password(payload.contrasena),
+        rol=payload.rol, id_faena=payload.id_faena,
     )
-    session.add(faena)
+    session.add(user)
     try:
         session.commit()
     except IntegrityError as error:
         session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Ese correo ya está asociado a otra cuenta.",
-        ) from error
-    session.refresh(faena)
-    return AdminAccountRead(**serialize_account(faena).model_dump(), misiones=0)
+        raise HTTPException(409, "Ese correo ya está asociado a otra cuenta.") from error
+    session.refresh(user)
+    return serialize_user(user)
 
 
-@router.patch("/admin/faenas/{faena_id}", response_model=AccountRead)
-def update_faena(
-    faena_id: str,
-    payload: AccountUpdateRequest,
-    cuenta: CurrentFaena,
-    session: Session = Depends(get_session),
-) -> AccountRead:
-    if not is_admin(cuenta):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
+@router.put("/admin/usuarios/{user_id}/password", status_code=204)
+def reset_password(user_id: str, payload: PasswordReset, _: Admin, session: Session = Depends(get_session)) -> None:
+    user = session.get(Usuario, user_id)
+    if user is None:
+        raise HTTPException(404, "Usuario no encontrado.")
+    user.hash_contrasena = hash_password(payload.contrasena)
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(409, "Ese correo ya está asociado a otra cuenta.") from error
 
-    faena = session.get(Faena, faena_id)
-    if faena is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faena no encontrada.")
 
-    nombre = payload.nombre.strip()
-    correo = payload.correo.strip().lower()
-    if not nombre:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="El nombre es obligatorio.")
-    if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo) is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Correo electrónico inválido.")
+@router.get("/faenas", response_model=list[FaenaRead])
+@router.get("/admin/faenas", response_model=list[FaenaRead])
+def list_faenas(_: Admin, session: Session = Depends(get_session)) -> list[FaenaRead]:
+    query = (
+        select(Faena.id_faena, Faena.nombre, func.count(Mision.id_mision))
+        .outerjoin(Mision, Faena.id_faena == Mision.id_faena)
+        .group_by(Faena.id_faena, Faena.nombre)
+        .order_by(Faena.nombre)
+    )
+    return [FaenaRead(id=id_faena, nombre=nombre, misiones=count) for id_faena, nombre, count in session.exec(query)]
 
-    existing = session.exec(select(Faena).where(Faena.correo == correo, Faena.id_faena != faena_id)).first()
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese correo ya está asociado a otra cuenta.")
 
-    faena.nombre = nombre
-    faena.correo = correo
+@router.post("/admin/faenas", response_model=FaenaRead, status_code=201)
+def create_faena(payload: FaenaWrite, _: Admin, session: Session = Depends(get_session)) -> FaenaRead:
+    faena = Faena(nombre=normalize_name(payload.nombre))
     session.add(faena)
     session.commit()
     session.refresh(faena)
-    return serialize_account(faena)
+    return FaenaRead(id=faena.id_faena, nombre=faena.nombre)
 
 
-@router.put("/faenas/{faena_id}/password", status_code=status.HTTP_204_NO_CONTENT)
-def reset_faena_password(
-    faena_id: str,
-    payload: PasswordResetRequest,
-    cuenta: CurrentFaena,
-    session: Session = Depends(get_session),
-) -> None:
-    """Permite a un administrador asignar una contraseña nueva a una faena."""
-    if not is_admin(cuenta):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
-
-    faena = session.get(Faena, faena_id)
-    if faena is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faena no encontrada.")
-
-    faena.hash_contrasena = hash_password(payload.contrasena)
-    session.add(faena)
+@router.patch("/admin/faenas/{faena_id}", response_model=FaenaRead)
+def update_faena(faena_id: str, payload: FaenaWrite, _: Admin, session: Session = Depends(get_session)) -> FaenaRead:
+    faena = require_faena(session, faena_id)
+    faena.nombre = normalize_name(payload.nombre)
     session.commit()
+    count = session.exec(select(func.count()).select_from(Mision).where(Mision.id_faena == faena_id)).one()
+    return FaenaRead(id=faena.id_faena, nombre=faena.nombre, misiones=count)
 
 
-@router.delete("/admin/faenas/{faena_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_faena(faena_id: str, cuenta: CurrentFaena, session: Session = Depends(get_session)) -> None:
-    """Elimina una cuenta sin misiones. Las misiones se eliminan antes, una por una,
-    para que borrar una cuenta nunca borre inspecciones por accidente."""
-    if not is_admin(cuenta):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo disponible para administradores.")
-    if faena_id == cuenta.id_faena:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No puedes eliminar tu propia cuenta.")
-
-    faena = session.get(Faena, faena_id)
-    if faena is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faena no encontrada.")
+@router.delete("/admin/faenas/{faena_id}", status_code=204)
+def delete_faena(faena_id: str, _: Admin, session: Session = Depends(get_session)) -> None:
+    faena = require_faena(session, faena_id, lock=True)
     if session.exec(select(Mision.id_mision).where(Mision.id_faena == faena_id)).first() is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="La cuenta tiene misiones. Elimínalas antes de eliminar la cuenta.",
-        )
-
+        raise HTTPException(409, "La faena tiene misiones. Elimínalas antes de eliminar la faena.")
+    if session.exec(select(Usuario.id_usuario).where(Usuario.id_faena == faena_id)).first() is not None:
+        raise HTTPException(409, "La faena tiene operadores asignados.")
     session.delete(faena)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(409, "La faena tiene recursos asociados.") from error

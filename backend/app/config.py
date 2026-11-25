@@ -27,16 +27,13 @@ class Settings(BaseSettings):
     # DETECTOR_MODE=neumavision: rocas (YOLO26) + pista (RF-DETR Seg) + ancho de pista
     rock_model_path: Path = Path("./models/rocas.pt")
     road_model_path: Path = Path("./models/pista.pt")
-    rock_confidence: float = 0.30      # umbral de operacion elegido (P ~81 %, R ~70 % en test)
+    rock_confidence: float = 0.30
     road_confidence: float = 0.20
-    road_margin: float = 0.02          # margen alrededor de la pista para aceptar rocas (fraccion de la imagen)
-    tile_width: int = 1280             # tiling igual al del entrenamiento (4K -> 3 x 2 tiles de 1280 x 1080)
+    road_margin: float = 0.02  # Fracción de la imagen.
+    tile_width: int = 1280  # Tamaño de los recortes de entrenamiento.
     tile_height: int = 1080
     default_gsd_cm_px: float | None = None  # se usa si la foto no trae altura en el EXIF
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
-    development_faena_id: str = "00000000-0000-0000-0000-000000000001"
-    development_faena_name: str = "NeumaDiesel"
-    development_faena_email: str = "neumavision@neumadiesel.com"
     # Clave privada para firmar tokens; debe configurarse en el .env local.
     secret_key: str = Field(min_length=32)
     token_hours: int = 12

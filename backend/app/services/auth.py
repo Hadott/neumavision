@@ -1,4 +1,4 @@
-"""Autenticacion por faena con tokens firmados (HMAC-SHA256, sin dependencias externas).
+"""Autenticación de usuarios con tokens firmados (HMAC-SHA256, sin dependencias externas).
 
 El token contiene el id de la cuenta y su vencimiento. La firma usa SECRET_KEY,
 por lo que no puede ser modificado por el cliente sin invalidarse.
@@ -16,10 +16,10 @@ from sqlmodel import Session
 
 from app.config import settings
 from app.database import get_session
-from app.models import Faena
+from app.models import Usuario
 
 ROL_ADMIN = "admin"
-ROL_FAENA = "faena"
+ROL_OPERADOR = "operador"
 
 
 def _b64encode(data: bytes) -> str:
@@ -35,9 +35,9 @@ def _sign(payload: str) -> str:
     return _b64encode(digest)
 
 
-def create_token(faena_id: str) -> str:
+def create_token(account_id: str) -> str:
     expires = int(time.time()) + settings.token_hours * 3600
-    payload = _b64encode(json.dumps({"sub": faena_id, "exp": expires}).encode())
+    payload = _b64encode(json.dumps({"sub": account_id, "exp": expires}).encode())
     return f"{payload}.{_sign(payload)}"
 
 
@@ -59,24 +59,24 @@ def get_current_faena(
     request: Request,
     token: str | None = Query(default=None, include_in_schema=False),
     session: Session = Depends(get_session),
-) -> Faena:
-    """Identifica la cuenta a partir del header Authorization o del parametro ?token=
-    (este ultimo se usa en las imagenes, que el navegador carga sin headers)."""
+) -> Usuario:
+    """Resuelve la cuenta y su asignación vigente; las imágenes también admiten un token en la URL."""
     header = request.headers.get("Authorization", "")
     raw = header[7:] if header.lower().startswith("bearer ") else token
-    faena_id = read_token(raw) if raw else None
-    faena = session.get(Faena, faena_id) if faena_id else None
-    if faena is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión inválida o vencida. Inicia sesión nuevamente.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return faena
+    account_id = read_token(raw) if raw else None
+    usuario = session.get(Usuario, account_id) if account_id else None
+    if usuario is not None and usuario.hash_contrasena and (is_admin(usuario) or usuario.id_faena):
+        return usuario
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Sesión inválida o vencida. Inicia sesión nuevamente.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
-CurrentFaena = Annotated[Faena, Depends(get_current_faena)]
+CurrentFaena = Annotated[Usuario, Depends(get_current_faena)]
 
 
-def is_admin(faena: Faena) -> bool:
-    return (faena.rol or ROL_FAENA) == ROL_ADMIN
+def is_admin(account: Usuario) -> bool:
+    return account.rol == ROL_ADMIN

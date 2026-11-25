@@ -1,12 +1,12 @@
 # 3. Documentación del backend
 
-El backend de NeumaDiesel Vision expone la API REST de inspección de caminos mineros. Autentica cuentas de faena, recibe misiones con fotografías, coordina la inferencia, registra resultados y entrega hallazgos e informes PDF. En modo remoto, el backend se ejecuta en Nina y envía las imágenes al servicio de inferencia de Jade.
+El backend de NeumaDiesel Vision expone la API REST de inspección de caminos mineros. Autentica operadores y administradores, recibe misiones con fotografías, coordina la inferencia, registra resultados y entrega hallazgos e informes PDF. En modo remoto, el backend se ejecuta en Nina y envía las imágenes al servicio de inferencia de Jade.
 
 ## Aplicación FastAPI
 
 FastAPI registra las rutas de autenticación, misiones y tablero bajo `/api/v1` de forma predeterminada. Pydantic define y valida los contratos HTTP. SQLModel y SQLAlchemy manejan las sesiones de PostgreSQL mediante psycopg. La documentación interactiva está en `/docs` y el esquema en `/openapi.json`.
 
-El arranque crea el directorio de carga, ejecuta `SQLModel.metadata.create_all()` y asegura que exista la cuenta administrativa inicial. Si la crea, queda sin una contraseña utilizable hasta que se configure. Los cambios de esquema en tablas existentes se gestionan con Alembic. Cuando Jade está configurada en modo remoto, FastAPI también inicia su monitor de inactividad. [Arranque de la aplicación](../backend/app/main.py) · [Acceso a datos](../backend/app/database.py) · [Administración de cuentas por consola](../backend/app/cuentas.py)
+El arranque crea el directorio de carga. Alembic inicializa y actualiza el esquema mediante `alembic upgrade head`. En una base nueva, crea el primer administrador con `python -m app.cuentas crear --nombre "Administrador" --correo admin@empresa.cl --admin`. Cuando Jade está configurada en modo remoto, FastAPI también inicia su monitor de inactividad. [Arranque de la aplicación](../backend/app/main.py) · [Acceso a datos](../backend/app/database.py) · [Administración de cuentas por consola](../backend/app/cuentas.py)
 
 ### Organización del código
 
@@ -24,9 +24,11 @@ El arranque crea el directorio de carga, ejecuta `SQLModel.metadata.create_all()
 
 ## Autenticación y permisos
 
-La cuenta autenticada es una faena. El login normaliza el correo y verifica la contraseña con Argon2 mediante pwdlib. La respuesta contiene `token` y `cuenta`, con `id`, `nombre`, `correo` y `rol`. El token usa una firma HMAC-SHA256 sobre una carga con el identificador y el vencimiento. La duración predeterminada es de 12 horas. El cliente usa `Authorization: Bearer <token>`; la dependencia de autenticación también admite `?token=` para solicitudes de imágenes iniciadas por el navegador.
+Cada operador tiene una cuenta personal asignada a una faena. El login normaliza el correo y verifica la contraseña con Argon2 mediante pwdlib. La respuesta contiene `token` y `cuenta`, con `id`, `nombre`, `correo` y `rol`. El token usa una firma HMAC-SHA256 sobre una carga con el identificador y el vencimiento. La duración predeterminada es de 12 horas. El cliente usa `Authorization: Bearer <token>`; la dependencia de autenticación también admite `?token=` para solicitudes de imágenes iniciadas por el navegador.
 
-El rol `faena` accede a sus propias misiones y hallazgos. El backend obtiene el identificador desde la cuenta autenticada. El rol `admin` puede acceder a las misiones de todas las faenas, filtrar por faena y asignar una faena existente al crear una misión. Las operaciones sobre imágenes y detecciones verifican además que el recurso pertenece a la misión solicitada. Una misión inaccesible para una cuenta de faena devuelve `404`. [Autenticación](../backend/app/services/auth.py) · [Autorización de misiones](../backend/app/api/missions.py)
+El rol `operador` accede a las misiones y hallazgos de la faena asignada. El backend consulta esa asignación en la base de datos al validar el token. El rol `admin` puede acceder a las misiones de todas las faenas, filtrar por faena y asignar una faena existente al crear una misión. Las operaciones sobre imágenes y detecciones verifican además que el recurso pertenece a la misión solicitada. Una misión inaccesible para un operador devuelve `404`. [Autenticación](../backend/app/services/auth.py) · [Autorización de misiones](../backend/app/api/missions.py)
+
+En **Administración → Cuentas y accesos**, el formulario **Crear faena** pide el nombre y **Crear usuario** pide el nombre, el correo, la contraseña inicial y el rol. Los operadores requieren una faena. Los administradores globales pueden acceder a todas. La revisión Alembic `20261125_0012` traslada los administradores y operadores a `usuario` conservando sus identificadores y hashes, y retira las credenciales de `faena`.
 
 ## Flujo de una misión
 
@@ -66,17 +68,20 @@ Las tablas muestran rutas relativas a `/api/v1`. `GET /health` y `POST /auth/log
 | `POST /auth/login` | JSON con `correo` y `contrasena`. | `200` con token y cuenta. |
 | `GET /auth/me` | — | `200` con la cuenta actual. |
 | `GET /auth/faenas` | **Admin**. | `200` con la lista de faenas cliente. |
-| `GET /auth/admin/faenas` | **Admin**. | `200` con todas las cuentas y el conteo de misiones de cada una. |
-| `POST /auth/admin/faenas` | **Admin**. JSON con `nombre`, `correo` y `contrasena`. | `201` con la cuenta de rol `faena` creada. |
-| `PATCH /auth/admin/faenas/{faena_id}` | **Admin**. JSON con `nombre` y `correo`. | `200` con la cuenta actualizada. |
-| `PUT /auth/faenas/{faena_id}/password` | **Admin**. JSON con `contrasena` de 8 a 128 caracteres. | `204`. |
+| `GET /auth/admin/faenas` | **Admin**. | `200` con las faenas y su cantidad de misiones. |
+| `POST /auth/admin/faenas` | **Admin**. JSON con `nombre`. | `201` con la faena. |
+| `PATCH /auth/admin/faenas/{faena_id}` | **Admin**. JSON con `nombre`. | `200` con la faena actualizada. |
+| `DELETE /auth/admin/faenas/{faena_id}` | **Admin**. Faena sin usuarios ni misiones. | `204`. |
+| `GET /auth/admin/usuarios` | **Admin**. | `200` con los usuarios. |
+| `POST /auth/admin/usuarios` | **Admin**. JSON con `nombre`, `correo`, `contrasena`, `rol` e `id_faena` para operadores. | `201` con la cuenta. |
+| `PUT /auth/admin/usuarios/{id}/password` | **Admin**. JSON con `contrasena` de 8 a 128 caracteres. | `204`. |
 
 ### Misiones y hallazgos
 
 | Método y ruta | Entrada | Respuesta |
 | --- | --- | --- |
 | `POST /missions` | Multipart con `name`, uno o más campos `files`, `segment` opcional y `faena_id` obligatorio para admin. | `201` con la misión y sus imágenes. |
-| `POST /missions/demo` | — | `201` con una misión de demostración. |
+| `POST /missions/demo` | `faena_id` como parámetro de consulta para admin. | `201` con una misión de demostración. |
 | `GET /missions` | `faena_id` opcional para admin. | `200` con resúmenes y conteos. |
 | `GET /missions/{mission_id}` | — | `200` con la misión, sus imágenes y detecciones. |
 | `DELETE /missions/{mission_id}` | — | `204`. |

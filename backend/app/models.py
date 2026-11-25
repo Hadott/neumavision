@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, Column, DateTime, Float, ForeignKey, Index, Integer, String, text
 from sqlmodel import Field, SQLModel
 
 
@@ -14,9 +14,35 @@ class Faena(SQLModel, table=True):
 
     id_faena: str = Field(default_factory=new_id, sa_column=Column("id_faena", String, primary_key=True))
     nombre: str = Field(sa_column=Column("nombre", String(120), nullable=False, index=True))
-    correo: str = Field(sa_column=Column("correo", String(255), nullable=False, unique=True, index=True))
-    hash_contrasena: str = Field(sa_column=Column("hash_contrasena", String(255), nullable=False))
-    rol: str = Field(default="faena", sa_column=Column("rol", String(20), nullable=False, default="faena", server_default="faena"))
+    fecha_creacion: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column("fecha_creacion", DateTime, nullable=False),
+    )
+
+
+class Usuario(SQLModel, table=True):
+    __tablename__ = "usuario"
+    __table_args__ = (
+        CheckConstraint("rol IN ('admin', 'operador') AND (rol != 'admin' OR id_faena IS NULL)", name="ck_usuario_rol"),
+        Index(
+            "ux_usuario_correo_local", "correo", unique=True,
+            postgresql_where=text("hash_contrasena IS NOT NULL"),
+            sqlite_where=text("hash_contrasena IS NOT NULL"),
+        ),
+    )
+
+    id_usuario: str = Field(default_factory=new_id, sa_column=Column("id_usuario", String, primary_key=True))
+    rol: str = Field(default="operador", sa_column=Column("rol", String(20), nullable=False, server_default="operador"))
+    id_faena: str | None = Field(
+        default=None,
+        sa_column=Column("id_faena", String, ForeignKey("faena.id_faena", ondelete="SET NULL"), nullable=True, index=True),
+    )
+    microsoft_subject: str | None = Field(
+        default=None, sa_column=Column("microsoft_subject", String(255), nullable=True, unique=True)
+    )
+    nombre: str = Field(sa_column=Column("nombre", String(120), nullable=False))
+    correo: str = Field(sa_column=Column("correo", String(255), nullable=False))
+    hash_contrasena: str | None = Field(default=None, sa_column=Column("hash_contrasena", String(255), nullable=True))
     fecha_creacion: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column("fecha_creacion", DateTime, nullable=False),
@@ -59,9 +85,6 @@ class Imagen(SQLModel, table=True):
         default="pending", sa_column=Column("estado_proceso", String(30), nullable=False, index=True)
     )
     clave_analisis_s3: str | None = Field(default=None, max_length=1024)
-    # Clasificacion de criticidad asignada manualmente por el revisor durante la revision
-    # (critico / moderado / optimo). Es independiente de la criticidad automatica por
-    # confianza que se usa en el Dashboard.
     criticidad_manual: str | None = Field(
         default=None, sa_column=Column("criticidad_manual", String(20), nullable=True)
     )

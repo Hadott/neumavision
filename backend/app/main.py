@@ -10,7 +10,6 @@ from app.api.auth import router as auth_router
 from app.api.missions import router as missions_router
 from app.api.dashboard import router as dashboard_router
 from app.config import settings
-from app.database import ensure_development_faena, initialize_database
 from app.schemas import HealthRead, InferenceAutoShutdownUpdate, InferenceHealthRead, InferenceInstanceRead
 from app.services.auth import CurrentFaena, is_admin
 from app.services.jade import IDLE_CHECK_SECONDS, JadeBusy, JadeUnavailable, jade
@@ -30,8 +29,6 @@ async def monitor_jade(stop: asyncio.Event) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
-    initialize_database()
-    ensure_development_faena()
     stop = asyncio.Event()
     monitor = None
     if settings.detector_mode == "remote" and settings.jade_instance_id:

@@ -2,7 +2,6 @@ import json
 import shutil
 from contextlib import ExitStack, nullcontext
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
@@ -17,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.database import get_session
-from app.models import Deteccion, Faena, Imagen, Informe, Mision
+from app.models import Usuario, Deteccion, Faena, Imagen, Informe, Mision
 from app.schemas import (
     DetectionRead,
     DetectionProgressRead,
@@ -130,7 +129,7 @@ def serialize_mission(session: Session, mission: Mision) -> MissionRead:
     )
 
 
-def require_mission(session: Session, mission_id: str, cuenta: Faena) -> Mision:
+def require_mission(session: Session, mission_id: str, cuenta: Usuario) -> Mision:
     """Busca la mision; una cuenta de faena solo accede a sus propias misiones."""
     query = select(Mision).where(Mision.id_mision == mission_id)
     if not is_admin(cuenta):
@@ -141,10 +140,11 @@ def require_mission(session: Session, mission_id: str, cuenta: Faena) -> Mision:
     return mission
 
 
-def target_faena_id(session: Session, cuenta: Faena, faena_id: str | None) -> str:
+def target_faena_id(session: Session, cuenta: Usuario, faena_id: str | None) -> str:
     """Faena a la que se asigna una mision nueva. El administrador debe indicarla;
     una cuenta de faena siempre crea misiones propias."""
     if not is_admin(cuenta):
+        assert cuenta.id_faena is not None
         return cuenta.id_faena
     if not faena_id:
         raise HTTPException(status_code=400, detail="Selecciona la faena a la que pertenece la misión.")
@@ -208,9 +208,13 @@ async def create_mission(
 
 
 @router.post("/demo", response_model=MissionRead, status_code=status.HTTP_201_CREATED)
-def create_demo_mission(cuenta: CurrentFaena, session: Session = Depends(get_session)) -> MissionRead:
+def create_demo_mission(
+    cuenta: CurrentFaena,
+    faena_id: str | None = None,
+    session: Session = Depends(get_session),
+) -> MissionRead:
     mission = Mision(
-        id_faena=cuenta.id_faena,
+        id_faena=target_faena_id(session, cuenta, faena_id),
         nombre="Misión demostrativa",
         tramo="Tramo A · km 2,4–3,0",
     )
@@ -433,8 +437,6 @@ def update_repair_status(
     cuenta: CurrentFaena,
     session: Session = Depends(get_session),
 ) -> DetectionRead:
-    # La confirmacion/revision de un hallazgo la realiza el modelo de IA; el estado de
-    # reparacion es independiente y no depende de estado_revision.
     require_mission(session, mission_id, cuenta)
     detection = session.get(Deteccion, detection_id)
     image = session.get(Imagen, detection.id_imagen) if detection else None
@@ -468,8 +470,7 @@ def update_image_criticality(
     image.criticidad_manual = payload.criticidad_manual
     session.add(image)
     if payload.criticidad_manual is not None:
-        # Asignar una criticidad significa que el revisor ya evaluo la imagen: confirma
-        # automaticamente los hallazgos que seguian pendientes de revision.
+        # La criticidad manual confirma las detecciones pendientes.
         detections = session.exec(select(Deteccion).where(Deteccion.id_imagen == image.id_imagen)).all()
         for detection in detections:
             if detection.estado_revision == "pending":

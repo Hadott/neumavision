@@ -15,7 +15,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.config import settings
 from app.database import get_session
 from app.main import app
-from app.models import Deteccion, Faena, Imagen, Mision
+from app.models import Deteccion, Faena, Imagen, Mision, Usuario
 from app.services.auth import get_current_faena
 from app.services.detector import OFF_ROAD_LABEL, DetectorError, RemoteDetector, overlay_path, width_paths
 
@@ -113,10 +113,9 @@ def isolated_platform(tmp_path, monkeypatch):
         connection.execute("PRAGMA foreign_keys=ON")
 
     SQLModel.metadata.create_all(engine)
-    actor = Faena(id_faena="mine-a", nombre="A", correo="a@test.cl", hash_contrasena="test", rol="faena")
+    actor = Usuario(id_faena="mine-a", nombre="A", correo="a@test.cl", hash_contrasena="test")
     with Session(engine) as session:
-        session.add(actor)
-        session.add(Faena(id_faena="mine-b", nombre="B", correo="b@test.cl", hash_contrasena="test", rol="faena"))
+        session.add_all([Faena(id_faena="mine-a", nombre="A"), Faena(id_faena="mine-b", nombre="B")])
         session.flush()
         session.add(Mision(id_mision="own", id_faena="mine-a", nombre="Propia"))
         session.add(Mision(id_mision="other", id_faena="mine-b", nombre="Ajena"))
